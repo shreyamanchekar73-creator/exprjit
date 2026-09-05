@@ -95,6 +95,24 @@ fn parse_args() -> Args {
     args
 }
 
+fn run_query(engine: &mut Engine, batch: &RecordBatch, query: &str, label: &str) -> Result<()> {
+    let compiled = engine.compile_query(query, batch).with_context(|| format!("compiling query `{query}`"))?;
+    let kept = compiled.filter(batch).with_context(|| format!("running query `{query}`"))?;
+
+    let compile_status = if compiled.cache_hit {
+        "cache hit (reused compiled code, 0 new compilation)".to_string()
+    } else {
+        format!("compiled in {:.2?}", compiled.compile_time)
+    };
+
+    println!("[{label}] query:        {query}");
+    println!("[{label}] compile:      {compile_status}");
+    println!("[{label}] rows total:   {}", batch.num_rows());
+    println!("[{label}] rows matched: {}", kept.len());
+    println!("[{label}] indices:      {kept:?}");
+    Ok(())
+}
+
 fn run() -> Result<()> {
     let args = parse_args();
 
@@ -114,14 +132,19 @@ fn run() -> Result<()> {
     }
 
     let query = args.query.unwrap_or_else(|| "age > 10 && score < 20.0".to_string());
-
     let mut engine = Engine::new();
-    let compiled = engine.compile_query(&query, &batch).with_context(|| format!("compiling query `{query}`"))?;
-    let kept = compiled.filter(&batch).with_context(|| format!("running query `{query}`"))?;
 
-    println!("query:   {query}");
-    println!("matched: {} of {} rows", kept.len(), batch.num_rows());
-    println!("indices: {kept:?}");
+    // Run the query once (this is always a cache miss -- the very first
+    // time this exact query shape is compiled), then run the identical
+    // query again on the same Engine to demonstrate the compilation cache:
+    // the second run should report a cache hit with zero new compile time,
+    // since it's the same Expr shape against the same schema shape.
+    run_query(&mut engine, &batch, &query, "run 1 (cold)")?;
+    println!();
+    run_query(&mut engine, &batch, &query, "run 2 (warm)")?;
+    println!();
+    println!("distinct query shapes compiled this session: {}", engine.compiled_shape_count());
+
     Ok(())
 }
 

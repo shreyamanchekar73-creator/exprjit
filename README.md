@@ -8,6 +8,13 @@ Given a query like `"age > 18 && score >= 4.5"`, exprjit parses it, compiles
 it directly to native machine code (not bytecode, not an interpreter loop),
 and runs that compiled predicate over every row of an Arrow `RecordBatch` to
 produce the matching row indices.
+...and runs that compiled predicate over every row of an Arrow `RecordBatch` to
+produce the matching row indices.
+
+## Project Dashboard
+
+Open `exprjit_dashboard.html` in a browser for a visual summary of the
+architecture, measured benchmark results, and correctness proof.
 
 ## Why JIT a query language?
 
