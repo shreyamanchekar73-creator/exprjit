@@ -1,10 +1,4 @@
-//! Hand-rolled tokenizer for the ExprJIT query language.
-//!
-//! Deliberately dependency-free (no `logos`) so this file can be compiled
-//! and unit-tested in isolation without pulling in a crate whose exact
-//! version/API might drift. Swap in `logos` later if you want derive-macro
-//! ergonomics; the `Token` enum below is shaped to make that an easy
-//! find-and-replace.
+
 
 use std::fmt;
 

@@ -1,15 +1,4 @@
-//! Recursive-descent parser for the ExprJIT query language, implementing
-//! the grammar documented in `ast.rs`:
-//!
-//!   expr    := or_expr
-//!   or_expr := and_expr ( "||" and_expr )*
-//!   and_expr:= cmp_expr ( "&&" cmp_expr )*
-//!   cmp_expr:= unary ( (">" | "<" | ">=" | "<=" | "==" | "!=") unary )?
-//!   unary   := "!"* atom
-//!   atom    := IDENT | INT | FLOAT | STRING | "(" expr ")"
-//!
-//! Dependency-free (no `chumsky`) for the same reason as `lexer.rs`: it
-//! keeps this file compilable and testable in isolation.
+
 
 use std::fmt;
 

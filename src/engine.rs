@@ -1,28 +1,3 @@
-//! Glue layer between a parsed query, the JIT, and an Arrow `RecordBatch`.
-//!
-//! `Engine::compile_query` parses + JIT-compiles a query string against a
-//! batch's schema; the resulting `CompiledQuery::filter` runs the compiled
-//! predicate over every row and returns the indices that matched.
-//!
-//! Only `Int64` and `Float64` columns are supported, matching what
-//! `jit.rs::ColType` and `ExprCodegen::gen_column_load` know how to load.
-//! Anything else (strings, nulls, other numeric widths) is rejected up
-//! front with a clear error rather than silently producing wrong results;
-//! route those queries through `interp.rs` instead.
-//!
-//! ## Compilation cache
-//!
-//! Cranelift compilation isn't free (see the `jit_compile_only` benchmark),
-//! so `Engine` caches compiled functions keyed by *structural shape*: the
-//! `Expr` tree's exact shape plus the schema's column layout, not the
-//! original query string. This means `"age > 10"` and a second, separately
-//! parsed `"age > 10"` reuse the same compiled function -- and so would two
-//! *different* query strings that happen to parse to the same `Expr` shape.
-//! It does NOT mean two structurally different queries share a cache entry,
-//! and it does NOT mean the cache is invalidated if you reuse column names
-//! with a different type/position in a different batch -- the schema shape
-//! is part of the key specifically to prevent that kind of stale reuse.
-
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 

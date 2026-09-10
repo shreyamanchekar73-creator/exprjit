@@ -1,22 +1,4 @@
-//! JIT compilation of `Expr` predicates to native machine code using
-//! Cranelift. Each compiled query becomes a function with signature:
-//!
-//! ```text
-//! extern "C" fn(columns: *const *const u8, row_idx: i64) -> u8
-//! ```
-//!
-//! `columns` is an array of raw pointers, one per column, pointing at the
-//! start of that column's contiguous primitive buffer (as exposed by Arrow's
-//! `PrimitiveArray::values()`). The compiled function reads `columns[i]`,
-//! indexes into it at `row_idx`, and evaluates the predicate for that row,
-//! returning 1 (keep) or 0 (drop).
-//!
-//! NOTE ON VERSIONING: Cranelift's boolean representation and a handful of
-//! builder method names have moved around release to release (e.g. whether
-//! `icmp`/`fcmp` return a plain `i8` or need an explicit `bint` conversion).
-//! The code below targets modern Cranelift where comparisons yield an `i8`
-//! (0/1) value directly. If your pinned version differs, the fix is
-//! localized to `ExprCodegen::gen_binop`.
+
 
 use std::collections::HashMap;
 

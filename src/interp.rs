@@ -1,10 +1,3 @@
-//! Tree-walking reference interpreter for `Expr`.
-//!
-//! This is deliberately simple and unoptimized: it exists as a correctness
-//! oracle for the JIT backend (`jit.rs`) and as a fallback path for queries
-//! the JIT doesn't (yet) handle, such as string comparisons. Every row is
-//! evaluated by walking the AST directly, no compilation involved.
-
 use std::collections::HashMap;
 use std::fmt;
 
@@ -39,8 +32,7 @@ fn err(msg: impl Into<String>) -> EvalError {
 /// One row's worth of column values, keyed by column name.
 pub type Row<'a> = HashMap<&'a str, Value>;
 
-/// Evaluate `expr` against a single row, requiring (and returning) a
-/// boolean result. This is the entry point used for row filtering.
+
 pub fn eval_bool(expr: &Expr, row: &Row) -> Result<bool, EvalError> {
     match eval(expr, row)? {
         Value::Bool(b) => Ok(b),

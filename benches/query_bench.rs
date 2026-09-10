@@ -1,21 +1,3 @@
-//! Criterion benchmarks for the JIT-compiled query predicates.
-//!
-//! `Cargo.toml` has `harness = false` for this bench target, which means
-//! Criterion supplies `fn main()` itself via `criterion_main!` at the
-//! bottom of this file. If that macro invocation is ever removed (or ends
-//! up nested inside another item instead of at top level), `cargo bench`
-//! fails with E0601 ("main function not found") because nothing else in
-//! this file generates an entry point for the `query_bench` binary.
-//!
-//! Three groups of benchmarks:
-//! - `jit_filter_10k_rows` / `jit_compile_only` -- the JIT path alone.
-//! - `interp_filter_10k_rows` -- the tree-walking interpreter over the same
-//!   data and query, so the JIT's speedup can be measured directly rather
-//!   than asserted.
-//! - `jit_compile_cold` / `jit_compile_cached` -- demonstrates the
-//!   query-shape compilation cache in `engine.rs`: compiling a brand-new
-//!   query shape vs. re-"compiling" (cache-hitting) one already seen.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 

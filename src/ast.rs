@@ -1,13 +1,3 @@
-//! Abstract Syntax Tree for the ExprJIT query expression language.
-//!
-//! Supported grammar (informal):
-//!   expr    := or_expr
-//!   or_expr := and_expr ( "||" and_expr )*
-//!   and_expr:= cmp_expr ( "&&" cmp_expr )*
-//!   cmp_expr:= unary ( (">" | "<" | ">=" | "<=" | "==" | "!=") unary )?
-//!   unary   := "!"* atom
-//!   atom    := IDENT | INT | FLOAT | STRING | "(" expr ")"
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     /// Reference to a column by name, e.g. `age`

@@ -1,19 +1,3 @@
-//! Minimal, dependency-free CSV loader that builds an Arrow `RecordBatch`
-//! directly, avoiding an extra `arrow-csv` dependency (and its own
-//! transitive dependency risk) for what is, for this project's purposes, a
-//! genuinely simple format: a header row of column names, followed by
-//! comma-separated numeric rows.
-//!
-//! Limitations (documented rather than silently mishandled):
-//! - No quoted fields, no embedded commas/newlines inside a field.
-//! - Every column must be entirely parseable as either `i64` or `f64` (a
-//!   column is `Int64` only if *every* value in it parses as an integer;
-//!   otherwise it's treated as `Float64`; if any value fails to parse as
-//!   a number at all, loading fails with a clear error naming the exact
-//!   row/column, rather than silently producing a `String`/null column
-//!   that the JIT filter path doesn't support anyway.
-//! - No null/empty-cell support.
-
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -119,6 +103,9 @@ mod tests {
         use std::fs::File;
         use std::io::Write;
         use std::path::PathBuf;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
 
         pub struct NamedTempFile {
             path: PathBuf,
@@ -126,9 +113,11 @@ mod tests {
         }
         impl NamedTempFile {
             pub fn new() -> Self {
+                let unique = COUNTER.fetch_add(1, Ordering::SeqCst);
                 let path = std::env::temp_dir().join(format!(
-                    "exprjit_test_{}_{}.csv",
+                    "exprjit_test_{}_{}_{}.csv",
                     std::process::id(),
+                    unique,
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap()
