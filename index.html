@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ExprJIT — Project Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#12151b;--panel:#181c24;--line:#262b36;--hot:#e8a33d;--cold:#5b6b8c;--text:#edeff3;--muted:#8b93a3;--faint:#565d6b;--good:#6fbf8b;--bad:#d96c6c}
+*{box-sizing:border-box;margin:0;padding:0}html{background:var(--bg);scroll-behavior:smooth}body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;line-height:1.5}.mono{font-family:'IBM Plex Mono',monospace}.wrap{max-width:1100px;margin:auto;padding:0 32px}
+header{border-bottom:1px solid var(--line);padding:22px 0}.head{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}.brand,.metric,.value,.bar-name,.bar-value,.input,.button,.result-title,.result-value,.history{font-family:'IBM Plex Mono',monospace}.brand{font-weight:600}.brand span,.num,.bar-callout,.feature-num{color:var(--hot)}.meta{font:12px 'IBM Plex Mono';color:var(--muted)}.ready{color:var(--good)}
+.hero{padding:58px 0;border-bottom:1px solid var(--line)}.hero-label{color:var(--muted);max-width:760px;margin-bottom:28px}.hero-figure{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap}.hero-num{font:700 clamp(64px,12vw,116px)/.9 'IBM Plex Mono';color:var(--hot)}.hero-caption{max-width:310px;padding-bottom:12px}.hero-sub{margin-top:20px;color:var(--faint);font:13px 'IBM Plex Mono';overflow-wrap:anywhere}.hero-sub b{color:var(--muted);font-weight:500}.live{display:inline-block;margin-top:12px;border:1px solid var(--line);padding:5px 9px;color:var(--good);font:11px 'IBM Plex Mono'}
+section{padding:48px 0;border-bottom:1px solid var(--line)}.section-head{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:28px}h2{font-size:20px}.note{font-size:13px;color:var(--muted);max-width:470px;text-align:right}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card{background:var(--panel);border:1px solid var(--line);padding:18px;min-height:132px}.feature-num{font:11px 'IBM Plex Mono';margin-bottom:12px}.value{font-size:24px;font-weight:700;margin-bottom:6px;overflow-wrap:anywhere}.label{font-size:12.5px;color:var(--muted)}
+.pipeline{display:flex;overflow:auto}.stage{flex:1;min-width:155px;padding:15px 28px 15px 0;position:relative}.stage:not(:last-child):after{content:'→';position:absolute;right:8px;top:28px;color:var(--faint);font:20px 'IBM Plex Mono'}.stage b{font-size:14px}.stage small{display:block;color:var(--muted);font-size:12.5px;margin-top:4px}
+.console{display:flex;gap:10px;margin-bottom:18px}.input{flex:1;background:var(--panel);color:var(--text);border:1px solid var(--line);padding:13px;font-size:13px;outline:0}.input:focus{border-color:var(--hot)}.button{background:var(--hot);color:#1a1305;border:1px solid var(--hot);padding:0 18px;font-weight:700;cursor:pointer}.result{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.box{background:var(--panel);border:1px solid var(--line);padding:14px}.result-title{font-size:11px;color:var(--muted);margin-bottom:6px}.result-value{font-size:16px;font-weight:600;overflow-wrap:anywhere}
+.bar{margin-bottom:30px}.bar:last-child{margin-bottom:0}.bar-title{font-weight:600;margin-bottom:13px}.bar-row{display:grid;grid-template-columns:150px 1fr 120px;gap:14px;align-items:center;margin:9px 0}.bar-name{font-size:12px;color:var(--muted)}.track{height:20px;background:var(--panel);border:1px solid var(--line);overflow:hidden}.fill{height:100%;width:0;transition:width .7s}.hot{background:var(--hot)}.cold{background:var(--cold)}.bar-value{font-size:12px;text-align:right}.bar-callout{font:13px 'IBM Plex Mono';margin-top:12px}
+.correct{display:grid;grid-template-columns:220px 1fr;gap:30px}.correct-num{font:700 42px 'IBM Plex Mono';color:var(--good)}.tags{display:flex;gap:8px;flex-wrap:wrap}.tag,.pill{background:var(--panel);border:1px solid var(--line);padding:6px 9px;font:12px 'IBM Plex Mono';color:var(--muted)}
+.obj{display:grid;grid-template-columns:18px 1fr auto;gap:14px;padding:15px 0;border-top:1px solid var(--line)}.dot{width:8px;height:8px;border-radius:50%;background:var(--good);margin-top:7px}.partial{background:var(--hot)}.obj p{font-size:13px;color:var(--muted);margin-top:3px}.status{font:11px 'IBM Plex Mono';color:var(--muted);white-space:nowrap}
+.pills{display:flex;gap:10px;flex-wrap:wrap}footer{padding:30px 0 45px;color:var(--faint);font:12px 'IBM Plex Mono';display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+@media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:760px){.result{grid-template-columns:repeat(2,1fr)}.correct{grid-template-columns:1fr}.bar-row{grid-template-columns:105px 1fr 90px}}@media(max-width:520px){.wrap{padding:0 18px}.grid,.result{grid-template-columns:1fr}.console{flex-direction:column}.button{min-height:44px}.obj{grid-template-columns:12px 1fr}}
+.try-query{cursor:pointer;text-decoration:underline;text-underline-offset:3px}.try-query:hover{opacity:.75}</style>
+</head>
+<body>
+
+<header><div class="wrap head"><div class="brand">Expr<span>JIT</span></div><div class="meta"><span class="ready">● Engine Ready</span> · T.Y.B.Sc. Computer Science · Project Dashboard</div></div></header>
+
+<div class="hero"><div class="wrap">
+<p class="hero-label">A query expression compiled into native machine code via Cranelift and executed over Apache Arrow columnar data. The metrics below come from the latest ExprJIT Rust execution.</p>
+<div class="hero-figure"><div class="hero-num" id="heroNum">0×</div><div class="hero-caption">JIT speedup over the interpreter for the latest query</div></div>
+<div class="hero-sub">JIT <b id="heroJit">0.00 µs</b> vs Interpreter <b id="heroInterp">0.00 µs</b> · Query <b id="heroQuery">—</b></div>
+<div class="live">● LIVE DATA FROM dashboard_data.js</div>
+</div></div>
+
+<section><div class="wrap"><div class="section-head"><h2>ExprJIT features</h2><div class="note">All 10 cards are connected to the latest Rust-generated dashboard data.</div></div>
+<div class="grid">
+<div class="card"><div class="feature-num">01</div><div class="value" id="featureQuery">—</div><div class="label">Current query</div></div>
+<div class="card"><div class="feature-num">02</div><div class="value" id="featureTotal">—</div><div class="label">Total rows in current dataset</div></div>
+<div class="card"><div class="feature-num">03</div><div class="value" id="featureMatched">—</div><div class="label">Rows matched by current query</div></div>
+<div class="card"><div class="feature-num">04</div><div class="value" id="featurePct">—</div><div class="label">Match percentage</div></div>
+<div class="card"><div class="feature-num">05</div><div class="value" id="featureCompile">—</div><div class="label">Compilation time — latest run</div></div>
+<div class="card"><div class="feature-num">06</div><div class="value" id="featureJit">—</div><div class="label">JIT filtering time — latest run</div></div>
+<div class="card"><div class="feature-num">07</div><div class="value" id="featureCache">—</div><div class="label">Current compilation cache status</div></div>
+<div class="card"><div class="feature-num">08</div><div class="value" id="featureSpeedup">—</div><div class="label">JIT speedup vs interpreter</div></div>
+<div class="card"><div class="feature-num">09</div><div class="value" id="featureCorrect">—</div><div class="label">JIT vs interpreter correctness</div></div>
+<div class="card"><div class="feature-num">10</div><div class="value" id="featureShapes">—</div><div class="label">Distinct query shapes compiled</div></div>
+</div>
+<div class="label" style="margin-top:18px">Latest Rust query is loaded into the input automatically. Type a new query and press RUN QUERY to make that query the current dashboard query. Refresh after running the Rust CLI to load its newest data.</div>
+</div></section>
+
+<section><div class="wrap"><div class="section-head"><h2>How a query gets compiled</h2><div class="note">The actual ExprJIT processing pipeline.</div></div>
+<div class="pipeline">
+<div class="stage"><div class="feature-num">01</div><b>Lexer</b><small>Tokenizes the query.</small></div>
+<div class="stage"><div class="feature-num">02</div><b>Parser</b><small>Builds the expression tree.</small></div>
+<div class="stage"><div class="feature-num">03</div><b>AST</b><small>Represents query structure.</small></div>
+<div class="stage"><div class="feature-num">04</div><b>Cranelift JIT</b><small>Generates native code.</small></div>
+<div class="stage"><div class="feature-num">05</div><b>Arrow batch</b><small>Evaluates columnar data.</small></div>
+</div></div></section>
+
+<section><div class="wrap"><div class="section-head"><h2>Query demo console</h2><div class="note">Browser-side demo of the 20-row sample dataset. Rust CLI remains authoritative.</div></div>
+<div class="console"><input id="queryInput" class="input" value="age > 10 && score < 20.0" aria-label="Query"><button class="button" id="runButton">RUN QUERY</button></div>
+<div class="result">
+<div class="box"><div class="result-title">QUERY STATUS</div><div class="result-value" id="demoStatus">Ready</div></div>
+<div class="box"><div class="result-title">ROWS MATCHED</div><div class="result-value" id="demoMatched">—</div></div>
+<div class="box"><div class="result-title">MATCH %</div><div class="result-value" id="demoPct">—</div></div>
+<div class="box"><div class="result-title">CACHE</div><div class="result-value" id="demoCache">See Rust result</div></div>
+</div>
+<div class="label" style="margin-top:12px">Try: <span class="mono try-query" data-query="age > 10">age &gt; 10</span> · <span class="mono try-query" data-query="age > 10 && score < 20.0">age &gt; 10 &amp;&amp; score &lt; 20.0</span> · <span class="mono try-query" data-query="age > 15 || score < 5.0">age &gt; 15 || score &lt; 5.0</span></div>
+</div></section>
+
+<section><div class="wrap"><div class="section-head"><h2>Latest execution performance</h2><div class="note">Live values from the latest Rust execution.</div></div>
+<div class="bar"><div class="bar-title">JIT vs interpreter</div>
+<div class="bar-row"><div class="bar-name">JIT execution</div><div class="track"><div class="fill hot" id="jitBar"></div></div><div class="bar-value" id="jitBarValue">—</div></div>
+<div class="bar-row"><div class="bar-name">Interpreter</div><div class="track"><div class="fill cold" id="interpBar"></div></div><div class="bar-value" id="interpBarValue">—</div></div>
+<div class="bar-callout">→ JIT speedup: <b id="performanceSpeedup">—</b></div></div>
+<div class="bar"><div class="bar-title">Compilation</div>
+<div class="bar-row"><div class="bar-name">Latest compile</div><div class="track"><div class="fill hot" id="compileBar"></div></div><div class="bar-value" id="compileBarValue">—</div></div>
+<div class="bar-row"><div class="bar-name">Cache status</div><div class="track"><div class="fill cold" id="cacheBar"></div></div><div class="bar-value" id="cacheBarValue">—</div></div>
+<div class="bar-callout">→ Current cache: <b id="performanceCache">—</b></div></div>
+</div></section>
+
+<section><div class="wrap"><div class="section-head"><h2>Current execution history</h2><div class="note">Latest row written by the Rust backend.</div></div>
+<table class="history" style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Query</th><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Rows</th><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Match</th><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Cache</th><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">JIT</th><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Interpreter</th></tr></thead>
+<tbody><tr><td id="hQuery" style="padding:10px">—</td><td id="hRows" style="padding:10px">—</td><td id="hMatch" style="padding:10px">—</td><td id="hCache" style="padding:10px">—</td><td id="hJit" style="padding:10px">—</td><td id="hInterp" style="padding:10px">—</td></tr></tbody></table>
+</div></section>
+
+<section><div class="wrap"><div class="section-head"><h2>Correctness</h2><div class="note">The interpreter is used as the reference for checking the JIT.</div></div>
+<div class="correct"><div><div class="correct-num" id="correctNum">—</div><div class="label" style="margin-top:8px">Latest JIT vs interpreter correctness</div></div>
+<div class="tags"><span class="tag">a &gt; 0</span><span class="tag">a &gt;= 10</span><span class="tag">a &lt; 0</span><span class="tag">a &lt;= 0</span><span class="tag">a == 0</span><span class="tag">a != 0</span><span class="tag">b &gt; 5.0</span><span class="tag">b &gt;= 5.0</span><span class="tag">b &lt; 0.0</span><span class="tag">b &lt;= 5.0</span><span class="tag">b == 5.0</span><span class="tag">b != 5.0</span><span class="tag">a &gt; 0 &amp;&amp; b &gt; 0.0</span><span class="tag">a &gt; 0 || b &lt; 0.0</span><span class="tag">!(a &gt; 0)</span><span class="tag">a &gt;= 1 &amp;&amp; a &lt;= 10</span></div></div>
+</div></section>
+
+<section><div class="wrap"><div class="section-head"><h2>Synopsis objectives</h2><div class="note">Implementation summary.</div></div>
+<div class="obj"><div class="dot partial"></div><div><b>Fast lexer for the query language</b><p>Implemented with a hand-rolled tokenizer.</p></div><div class="status">implemented differently</div></div>
+<div class="obj"><div class="dot partial"></div><div><b>Parser building a well-formed AST</b><p>Implemented with a hand-rolled recursive-descent parser.</p></div><div class="status">implemented differently</div></div>
+<div class="obj"><div class="dot"></div><div><b>AST → native machine code via Cranelift</b><p>Queries compile to native executable code at runtime.</p></div><div class="status">done</div></div>
+<div class="obj"><div class="dot"></div><div><b>Direct evaluation over Arrow columnar data</b><p>The compiled function evaluates the Arrow data.</p></div><div class="status">done</div></div>
+<div class="obj"><div class="dot"></div><div><b>Query-shape compilation cache</b><p>Repeated query shapes reuse compiled code.</p></div><div class="status">done</div></div>
+<div class="obj"><div class="dot"></div><div><b>JIT vs interpreter benchmarking</b><p>Execution times are displayed from the Rust backend.</p></div><div class="status">done</div></div>
+</div></section>
+
+<section style="border-bottom:0"><div class="wrap"><div class="section-head"><h2>Stack</h2></div><div class="pills">
+<div class="pill"><b>Rust</b> · systems language</div><div class="pill"><b>Cranelift 0.124</b> · JIT codegen</div><div class="pill"><b>Apache Arrow 57.0</b> · columnar memory</div><div class="pill"><b>Criterion 0.5</b> · benchmarking</div><div class="pill">hand-rolled lexer + parser</div><div class="pill">GitHub Actions CI</div>
+</div></div></section>
+
+<footer><div class="wrap" style="display:flex;justify-content:space-between;width:100%;flex-wrap:wrap;gap:10px"><span>ExprJIT · T.Y.B.Sc. Computer Science</span><span>Just-In-Time Compiler for a Query Expression Language</span></div></footer>
+
+<script src="dashboard_data.js"></script>
+<script>
+(function(){
+"use strict";
+const d=window.EXPRJIT_DATA||{};
+const n=(v,f=0)=>Number.isFinite(Number(v))?Number(v):f;
+const s=(v,f="—")=>(v===undefined||v===null||v==="")?f:String(v);
+const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v};
+const q=s(d.query), total=n(d.totalRows), matched=n(d.matchedRows), pct=n(d.matchPct);
+  // Load the latest query from the Rust-generated dashboard data into the input itself.
+  const queryInput=document.getElementById("queryInput");
+  if(queryInput && d.query && d.query !== "—") queryInput.value=d.query;
+const compile=n(d.compileUs), jit=n(d.jitUs), interp=n(d.interpreterUs), speed=n(d.speedup);
+const shapes=n(d.compiledShapes), cache=s(d.cacheStatus,"UNKNOWN").toUpperCase(), correct=s(d.correctness,"UNKNOWN").toUpperCase();
+const fmt=v=>n(v).toFixed(2)+" µs", pctText=pct.toFixed(1).replace(".0","")+"%";
+
+set("heroNum",speed.toFixed(2)+"×");set("heroJit",fmt(jit));set("heroInterp",fmt(interp));set("heroQuery",q);
+set("featureQuery",q);set("featureTotal",total);set("featureMatched",matched);set("featurePct",pctText);
+set("featureCompile",fmt(compile));set("featureJit",fmt(jit));set("featureCache",cache);set("featureSpeedup",speed.toFixed(2)+"×");
+set("featureCorrect",correct);set("featureShapes",shapes);
+
+set("demoStatus","Loaded from Rust");set("demoMatched",matched+" / "+total);set("demoPct",pctText);set("demoCache",cache);
+set("jitBarValue",fmt(jit));set("interpBarValue",fmt(interp));set("performanceSpeedup",speed.toFixed(2)+"×");
+set("compileBarValue",fmt(compile));set("cacheBarValue",cache);set("performanceCache",cache);
+set("hQuery",q);set("hRows",total);set("hMatch",matched+" ("+pctText+")");set("hCache",cache);set("hJit",fmt(jit));set("hInterp",fmt(interp));set("correctNum",correct);
+
+const max=Math.max(jit,interp,1);
+document.getElementById("jitBar").style.width=(jit/max*100)+"%";
+document.getElementById("interpBar").style.width=(interp/max*100)+"%";
+document.getElementById("compileBar").style.width=(compile>0?100:2)+"%";
+document.getElementById("cacheBar").style.width=(cache==="HIT"?100:25)+"%";
+
+const rows=Array.from({length:20},(_,i)=>({age:i,score:i*1.3}));
+function tokenize(x){
+ const t=[];let i=0;
+ while(i<x.length){const c=x[i];if(/\s/.test(c)){i++;continue}
+ if("()".includes(c)){t.push({t:c});i++;continue}
+ if(c==="!"&&x[i+1]!=="="){t.push({t:"!"});i++;continue}
+ if(c==="!"&&x[i+1]==="="){t.push({t:"!="});i+=2;continue}
+ if(c==="&"&&x[i+1]==="&"){t.push({t:"&&"});i+=2;continue}
+ if(c==="|"&&x[i+1]==="|"){t.push({t:"||"});i+=2;continue}
+ if([">","<","="].includes(c)){let op=c;if(x[i+1]==="="){op+="=";i+=2}else i++;if(op==="=")throw Error("use ==");t.push({t:op});continue}
+ if(/[0-9]/.test(c)){let j=i,dot=false;while(j<x.length&&(/[0-9]/.test(x[j])||(x[j]==="."&&!dot))){if(x[j]===".")dot=true;j++}t.push({t:"num",v:Number(x.slice(i,j))});i=j;continue}
+ if(/[A-Za-z_]/.test(c)){let j=i;while(j<x.length&&/[A-Za-z0-9_]/.test(x[j]))j++;t.push({t:"id",v:x.slice(i,j)});i=j;continue}
+ throw Error("unexpected character");
+ }t.push({t:"eof"});return t;
+}
+function evaluate(t,row){let p=0,peek=()=>t[p],bump=()=>t[p++];
+ function atom(){let x=bump();if(x.t==="id"){if(!(x.v in row))throw Error("unknown column");return row[x.v]}if(x.t==="num")return x.v;if(x.t==="("){let v=or();if(peek().t!==")")throw Error("missing )");bump();return v}throw Error("bad token")}
+ function unary(){if(peek().t==="!"){bump();return !unary()}return atom()}
+ function cmp(){let a=unary(),op=peek().t;if([">","<",">=","<=","==","!="].includes(op)){bump();let b=unary();if(op===">")return a>b;if(op==="<")return a<b;if(op===">=")return a>=b;if(op==="<=")return a<=b;if(op==="==")return a===b;return a!==b}return a}
+ function and(){let a=cmp();while(peek().t==="&&"){bump();let b=cmp();a=a&&b}return a}
+ function or(){let a=and();while(peek().t==="||"){bump();let b=and();a=a||b}return a}
+ let r=or();if(peek().t!=="eof")throw Error("trailing input");return !!r;
+}
+function demo(){
+ const input=document.getElementById("queryInput");
+ const x=input.value.trim();
+
+ // Always show the query currently typed by the user.
+ set("featureQuery",x || "—");
+ set("hQuery",x || "—");
+
+ let m=[];
+ if(!x){
+   set("demoStatus","Enter a query");
+   set("demoMatched","—");
+   set("demoPct","—");
+   set("demoCache","—");
+   set("featureMatched","—");
+   set("featurePct","—");
+   set("featureCache","—");
+   set("hRows","—");
+   set("hMatch","—");
+   set("hCache","—");
+   set("hJit","—");
+   set("hInterp","—");
+   return;
+ }
+
+ try{
+   const tokens=tokenize(x);
+   rows.forEach((r,i)=>{if(evaluate(tokens,r))m.push(i)});
+ }catch(e){
+   // Clear old results so a new/invalid query never shows stale values.
+   set("demoStatus","Invalid query");
+   set("demoMatched","—");
+   set("demoPct","—");
+   set("demoCache","Browser demo");
+   set("featureMatched","—");
+   set("featurePct","—");
+   set("featureCache","Browser demo");
+   set("hRows",rows.length);
+   set("hMatch","—");
+   set("hCache","Browser demo");
+   set("hJit","—");
+   set("hInterp","—");
+   return;
+ }
+
+ const p=((m.length/rows.length)*100).toFixed(1).replace(".0","");
+ const same=x===q.trim();
+
+ // Update all current-query/result displays immediately.
+ set("demoStatus",same?"Rust result + browser check":"Browser demo");
+ set("demoMatched",m.length+" / "+rows.length);
+ set("demoPct",p+"%");
+ set("demoCache",same?cache:"Browser demo");
+
+ set("featureQuery",x);
+ set("featureMatched",m.length);
+ set("featurePct",p+"%");
+ set("featureCache",same?cache:"Browser demo");
+
+ set("hQuery",x);
+ set("hRows",rows.length);
+ set("hMatch",m.length+" ("+p+"%)");
+ set("hCache",same?cache:"Browser demo");
+}
+document.getElementById("runButton").addEventListener("click",demo);
+document.getElementById("queryInput").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();demo();}});
+
+document.querySelectorAll(".try-query").forEach(el=>{
+ el.addEventListener("click",()=>{
+   document.getElementById("queryInput").value=el.dataset.query;
+   demo();
+ });
+});
+})();
+</script>
+</body>
+</html>
