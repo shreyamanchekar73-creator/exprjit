@@ -17,7 +17,8 @@ fn build_batch(rows: usize) -> RecordBatch {
     ]));
     let col_a = Int64Array::from((0..rows as i64).collect::<Vec<_>>());
     let col_b = Float64Array::from((0..rows).map(|i| i as f64 * 0.5).collect::<Vec<_>>());
-    RecordBatch::try_new(schema, vec![Arc::new(col_a), Arc::new(col_b)]).expect("building bench batch")
+    RecordBatch::try_new(schema, vec![Arc::new(col_a), Arc::new(col_b)])
+        .expect("building bench batch")
 }
 
 /// (a > 10) && (b < 5.0), built directly as an `Expr` rather than parsed,
@@ -42,7 +43,11 @@ fn build_expr() -> Expr {
 /// "cold compile" benchmark a query shape it hasn't seen before on each
 /// iteration's fresh `Engine` (see `bench_jit_compile_cold`).
 fn build_expr_variant(threshold: i64) -> Expr {
-    Expr::Binary(Box::new(Expr::Column("a".to_string())), BinOp::Gt, Box::new(Expr::IntLit(threshold)))
+    Expr::Binary(
+        Box::new(Expr::Column("a".to_string())),
+        BinOp::Gt,
+        Box::new(Expr::IntLit(threshold)),
+    )
 }
 
 fn bench_jit_filter(c: &mut Criterion) {
@@ -50,7 +55,9 @@ fn bench_jit_filter(c: &mut Criterion) {
     let expr = build_expr();
 
     let mut engine = Engine::new();
-    let compiled = engine.compile_expr(&expr, &batch).expect("compiling bench query");
+    let compiled = engine
+        .compile_expr(&expr, &batch)
+        .expect("compiling bench query");
 
     c.bench_function("jit_filter_10k_rows", |b| {
         b.iter(|| black_box(compiled.filter(&batch).expect("filter").len()))
@@ -64,7 +71,11 @@ fn bench_compile_only(c: &mut Criterion) {
     c.bench_function("jit_compile_only", |b| {
         b.iter(|| {
             let mut engine = Engine::new();
-            black_box(engine.compile_expr(&expr, &batch).expect("compiling bench query"));
+            black_box(
+                engine
+                    .compile_expr(&expr, &batch)
+                    .expect("compiling bench query"),
+            );
         })
     });
 }
@@ -81,8 +92,18 @@ fn bench_interp_filter(c: &mut Criterion) {
     // extract each row's values up front the same way
     // tests/jit_vs_interp.rs does, to keep the timed closure itself
     // focused on evaluation rather than Arrow downcasting.
-    let a_vals = batch.columns()[0].as_any().downcast_ref::<Int64Array>().unwrap().values().to_vec();
-    let b_vals = batch.columns()[1].as_any().downcast_ref::<Float64Array>().unwrap().values().to_vec();
+    let a_vals = batch.columns()[0]
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .unwrap()
+        .values()
+        .to_vec();
+    let b_vals = batch.columns()[1]
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .unwrap()
+        .values()
+        .to_vec();
 
     c.bench_function("interp_filter_10k_rows", |b| {
         b.iter(|| {
@@ -115,7 +136,11 @@ fn bench_jit_compile_cold(c: &mut Criterion) {
             let mut engine = Engine::new();
             counter += 1;
             let expr = build_expr_variant(counter);
-            black_box(engine.compile_expr(&expr, &batch).expect("compiling bench query"));
+            black_box(
+                engine
+                    .compile_expr(&expr, &batch)
+                    .expect("compiling bench query"),
+            );
         })
     });
 }
@@ -133,7 +158,10 @@ fn bench_jit_compile_cached(c: &mut Criterion) {
     c.bench_function("jit_compile_cached", |b| {
         b.iter(|| {
             let compiled = engine.compile_expr(&expr, &batch).expect("cached compile");
-            assert!(compiled.cache_hit, "expected a cache hit in the cached benchmark");
+            assert!(
+                compiled.cache_hit,
+                "expected a cache hit in the cached benchmark"
+            );
             black_box(compiled);
         })
     });

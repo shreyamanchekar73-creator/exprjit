@@ -1,5 +1,3 @@
-
-
 use std::fmt;
 
 use crate::ast::{BinOp, Expr, UnOp};
@@ -20,7 +18,9 @@ impl std::error::Error for ParseError {}
 
 impl From<LexError> for ParseError {
     fn from(e: LexError) -> Self {
-        ParseError { message: e.to_string() }
+        ParseError {
+            message: e.to_string(),
+        }
     }
 }
 
@@ -57,7 +57,9 @@ impl Parser {
             self.bump();
             Ok(())
         } else {
-            Err(ParseError { message: format!("expected {want}, found {}", self.peek()) })
+            Err(ParseError {
+                message: format!("expected {want}, found {}", self.peek()),
+            })
         }
     }
 
@@ -121,7 +123,9 @@ impl Parser {
                 self.expect(&Token::RParen)?;
                 Ok(inner)
             }
-            other => Err(ParseError { message: format!("unexpected {other}, expected an expression") }),
+            other => Err(ParseError {
+                message: format!("unexpected {other}, expected an expression"),
+            }),
         }
     }
 }
@@ -135,7 +139,11 @@ mod tests {
         let e = parse("age > 10").unwrap();
         assert_eq!(
             e,
-            Expr::Binary(Box::new(Expr::Column("age".into())), BinOp::Gt, Box::new(Expr::IntLit(10)))
+            Expr::Binary(
+                Box::new(Expr::Column("age".into())),
+                BinOp::Gt,
+                Box::new(Expr::IntLit(10))
+            )
         );
     }
 
@@ -144,12 +152,24 @@ mod tests {
         // a || b && c  ==  a || (b && c)
         let e = parse("a == 1 || b == 2 && c == 3").unwrap();
         let expected = Expr::Binary(
-            Box::new(Expr::Binary(Box::new(Expr::Column("a".into())), BinOp::Eq, Box::new(Expr::IntLit(1)))),
+            Box::new(Expr::Binary(
+                Box::new(Expr::Column("a".into())),
+                BinOp::Eq,
+                Box::new(Expr::IntLit(1)),
+            )),
             BinOp::Or,
             Box::new(Expr::Binary(
-                Box::new(Expr::Binary(Box::new(Expr::Column("b".into())), BinOp::Eq, Box::new(Expr::IntLit(2)))),
+                Box::new(Expr::Binary(
+                    Box::new(Expr::Column("b".into())),
+                    BinOp::Eq,
+                    Box::new(Expr::IntLit(2)),
+                )),
                 BinOp::And,
-                Box::new(Expr::Binary(Box::new(Expr::Column("c".into())), BinOp::Eq, Box::new(Expr::IntLit(3)))),
+                Box::new(Expr::Binary(
+                    Box::new(Expr::Column("c".into())),
+                    BinOp::Eq,
+                    Box::new(Expr::IntLit(3)),
+                )),
             )),
         );
         assert_eq!(e, expected);
@@ -163,9 +183,17 @@ mod tests {
             Expr::Unary(
                 UnOp::Not,
                 Box::new(Expr::Binary(
-                    Box::new(Expr::Binary(Box::new(Expr::Column("a".into())), BinOp::Gt, Box::new(Expr::IntLit(1)))),
+                    Box::new(Expr::Binary(
+                        Box::new(Expr::Column("a".into())),
+                        BinOp::Gt,
+                        Box::new(Expr::IntLit(1))
+                    )),
                     BinOp::And,
-                    Box::new(Expr::Binary(Box::new(Expr::Column("b".into())), BinOp::Lt, Box::new(Expr::IntLit(2)))),
+                    Box::new(Expr::Binary(
+                        Box::new(Expr::Column("b".into())),
+                        BinOp::Lt,
+                        Box::new(Expr::IntLit(2))
+                    )),
                 ))
             )
         );

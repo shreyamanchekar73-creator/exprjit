@@ -30,7 +30,11 @@ impl Default for Engine {
 
 impl Engine {
     pub fn new() -> Self {
-        Engine { jit: Jit::new(), next_query_id: 0, cache: HashMap::new() }
+        Engine {
+            jit: Jit::new(),
+            next_query_id: 0,
+            cache: HashMap::new(),
+        }
     }
 
     /// Number of distinct query shapes actually compiled so far (i.e. cache
@@ -43,7 +47,9 @@ impl Engine {
     /// Parse `query` and JIT-compile it (or reuse a cached compilation) against
     /// `batch`'s schema.
     pub fn compile_query(&mut self, query: &str, batch: &RecordBatch) -> Result<CompiledQuery> {
-        let expr = parse(query).map_err(|e| anyhow!(e.to_string())).context("parsing query")?;
+        let expr = parse(query)
+            .map_err(|e| anyhow!(e.to_string()))
+            .context("parsing query")?;
         self.compile_expr(&expr, batch)
     }
 
@@ -62,7 +68,12 @@ impl Engine {
         let key = format!("{}|{}", schema_key, expr_cache_key(expr));
 
         if let Some(&compiled) = self.cache.get(&key) {
-            return Ok(CompiledQuery { compiled, compile_time: Duration::ZERO, cache_hit: true, schema_key });
+            return Ok(CompiledQuery {
+                compiled,
+                compile_time: Duration::ZERO,
+                cache_hit: true,
+                schema_key,
+            });
         }
 
         let started = Instant::now();
@@ -72,7 +83,12 @@ impl Engine {
         let compile_time = started.elapsed();
 
         self.cache.insert(key, compiled);
-        Ok(CompiledQuery { compiled, compile_time, cache_hit: false, schema_key })
+        Ok(CompiledQuery {
+            compiled,
+            compile_time,
+            cache_hit: false,
+            schema_key,
+        })
     }
 }
 
@@ -137,7 +153,9 @@ fn check_expr(expr: &Expr, schema: &Schema) -> Result<Kind> {
             Kind::Num
         }
         Expr::IntLit(_) | Expr::FloatLit(_) => Kind::Num,
-        Expr::StrLit(_) => bail!("string literals are not supported by the JIT path (only Int64/Float64 columns)"),
+        Expr::StrLit(_) => {
+            bail!("string literals are not supported by the JIT path (only Int64/Float64 columns)")
+        }
         Expr::Unary(_, inner) => {
             if check_expr(inner, schema)? != Kind::Bool {
                 bail!("`!` must be applied to a true/false expression, e.g. `!(age > 5)`");
@@ -147,7 +165,11 @@ fn check_expr(expr: &Expr, schema: &Schema) -> Result<Kind> {
         Expr::Binary(lhs, op, rhs) => {
             let l = check_expr(lhs, schema)?;
             let r = check_expr(rhs, schema)?;
-            let want = if matches!(op, BinOp::And | BinOp::Or) { Kind::Bool } else { Kind::Num };
+            let want = if matches!(op, BinOp::And | BinOp::Or) {
+                Kind::Bool
+            } else {
+                Kind::Num
+            };
             if l != want || r != want {
                 if want == Kind::Bool {
                     bail!("`&&` / `||` need true/false expressions on both sides");
@@ -176,7 +198,9 @@ fn expr_cache_key(expr: &Expr) -> String {
         Expr::FloatLit(f) => format!("float({f})"),
         Expr::StrLit(s) => format!("str({s:?})"),
         Expr::Unary(op, inner) => format!("un({op:?},{})", expr_cache_key(inner)),
-        Expr::Binary(l, op, r) => format!("bin({:?},{},{})", op, expr_cache_key(l), expr_cache_key(r)),
+        Expr::Binary(l, op, r) => {
+            format!("bin({:?},{},{})", op, expr_cache_key(l), expr_cache_key(r))
+        }
     }
 }
 

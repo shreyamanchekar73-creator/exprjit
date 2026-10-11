@@ -12,13 +12,16 @@ use arrow::record_batch::RecordBatch;
 /// the same number of comma-separated fields.
 pub fn load_csv(path: impl AsRef<Path>) -> Result<RecordBatch> {
     let path = path.as_ref();
-    let content = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let content =
+        fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     // Files saved by Excel/Notepad may start with a UTF-8 BOM, which would
     // otherwise become part of the first column name.
     let content = content.trim_start_matches('\u{feff}');
 
     let mut lines = content.lines().filter(|l| !l.trim().is_empty());
-    let header = lines.next().ok_or_else(|| anyhow::anyhow!("{}: file is empty (no header row)", path.display()))?;
+    let header = lines
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("{}: file is empty (no header row)", path.display()))?;
     let col_names: Vec<String> = header.split(',').map(|s| s.trim().to_string()).collect();
     let mut seen = std::collections::HashSet::new();
     for n in &col_names {
@@ -26,7 +29,11 @@ pub fn load_csv(path: impl AsRef<Path>) -> Result<RecordBatch> {
             bail!("{}: header has an empty column name", path.display());
         }
         if !seen.insert(n.as_str()) {
-            bail!("{}: duplicate column name `{}` in header", path.display(), n);
+            bail!(
+                "{}: duplicate column name `{}` in header",
+                path.display(),
+                n
+            );
         }
     }
 
@@ -60,21 +67,17 @@ pub fn load_csv(path: impl AsRef<Path>) -> Result<RecordBatch> {
     for (name, values) in col_names.iter().zip(raw_cols.iter()) {
         let all_ints = values.iter().all(|v| v.parse::<i64>().is_ok());
         if all_ints {
-            let parsed: Vec<i64> = values
-                .iter()
-                .map(|v| v.parse::<i64>().unwrap())
-                .collect();
+            let parsed: Vec<i64> = values.iter().map(|v| v.parse::<i64>().unwrap()).collect();
             fields.push(Field::new(name, DataType::Int64, false));
             arrays.push(Arc::new(Int64Array::from(parsed)));
             continue;
         }
         // NaN / inf parse as f64 but break JIT-vs-interpreter agreement, so reject them.
-        let all_floats = values.iter().all(|v| v.parse::<f64>().map_or(false, |x| x.is_finite()));
+        let all_floats = values
+            .iter()
+            .all(|v| v.parse::<f64>().is_ok_and(|x| x.is_finite()));
         if all_floats {
-            let parsed: Vec<f64> = values
-                .iter()
-                .map(|v| v.parse::<f64>().unwrap())
-                .collect();
+            let parsed: Vec<f64> = values.iter().map(|v| v.parse::<f64>().unwrap()).collect();
             fields.push(Field::new(name, DataType::Float64, false));
             arrays.push(Arc::new(Float64Array::from(parsed)));
             continue;
@@ -82,7 +85,7 @@ pub fn load_csv(path: impl AsRef<Path>) -> Result<RecordBatch> {
         // Find the first offending value for a precise error message.
         let bad = values
             .iter()
-            .find(|v| !v.parse::<f64>().map_or(false, |x| x.is_finite()))
+            .find(|v| !v.parse::<f64>().is_ok_and(|x| x.is_finite()))
             .cloned()
             .unwrap_or_default();
         bail!(
@@ -93,7 +96,8 @@ pub fn load_csv(path: impl AsRef<Path>) -> Result<RecordBatch> {
     }
 
     let schema = Arc::new(ArrowSchema::new(fields));
-    RecordBatch::try_new(schema, arrays).with_context(|| format!("{}: building RecordBatch", path.display()))
+    RecordBatch::try_new(schema, arrays)
+        .with_context(|| format!("{}: building RecordBatch", path.display()))
 }
 
 #[cfg(test)]
@@ -178,7 +182,10 @@ mod tests {
     fn rejects_non_numeric_column() {
         let f = write_temp_csv("name,age\nbob,10\nalice,20\n");
         let err = load_csv(f.path()).unwrap_err();
-        assert!(err.to_string().contains("name"), "error should name the offending column: {err}");
+        assert!(
+            err.to_string().contains("name"),
+            "error should name the offending column: {err}"
+        );
     }
 
     #[test]

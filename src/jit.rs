@@ -1,5 +1,3 @@
-
-
 use std::collections::HashMap;
 
 use cranelift::prelude::*;
@@ -27,6 +25,11 @@ pub type CompiledFilterFn = unsafe extern "C" fn(*const *const u8, i64) -> u8;
 pub struct Jit {
     module: JITModule,
 }
+impl Default for Jit {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Jit {
     pub fn new() -> Self {
@@ -37,7 +40,8 @@ impl Jit {
         // Rust code is still fully safe/bounds-checked.
         flag_builder.set("opt_level", "speed").unwrap();
 
-        let isa_builder = cranelift_native::builder().expect("host machine not supported by Cranelift");
+        let isa_builder =
+            cranelift_native::builder().expect("host machine not supported by Cranelift");
         let isa = isa_builder
             .finish(settings::Flags::new(flag_builder))
             .expect("failed to build target ISA");
@@ -149,22 +153,32 @@ impl<'a, 'b> ExprCodegen<'a, 'b> {
         // columns[idx] -> pointer to that column's contiguous buffer
         let ptr_bytes = self.ptr_type.bytes() as i32;
         let offset = (idx as i32) * ptr_bytes;
-        let col_ptr = self
-            .builder
-            .ins()
-            .load(self.ptr_type, MemFlags::trusted(), self.cols_ptr, offset);
+        let col_ptr =
+            self.builder
+                .ins()
+                .load(self.ptr_type, MemFlags::trusted(), self.cols_ptr, offset);
 
         // address = col_ptr + row_idx * sizeof(element)
         let byte_offset = self.builder.ins().imul_imm(self.row_idx, 8); // both Int64/Float64 are 8 bytes
         let addr = self.builder.ins().iadd(col_ptr, byte_offset);
 
         match ty {
-            ColType::Int64 => Val::Int(self.builder.ins().load(types::I64, MemFlags::trusted(), addr, 0)),
-            ColType::Float64 => Val::Float(self.builder.ins().load(types::F64, MemFlags::trusted(), addr, 0)),
+            ColType::Int64 => Val::Int(self.builder.ins().load(
+                types::I64,
+                MemFlags::trusted(),
+                addr,
+                0,
+            )),
+            ColType::Float64 => Val::Float(self.builder.ins().load(
+                types::F64,
+                MemFlags::trusted(),
+                addr,
+                0,
+            )),
         }
     }
 
-    fn to_float(&mut self, v: Val) -> Value {
+    fn coerce_float(&mut self, v: Val) -> Value {
         match v {
             Val::Float(f) => f,
             Val::Int(i) => self.builder.ins().fcvt_from_sint(types::F64, i),
@@ -204,8 +218,8 @@ impl<'a, 'b> ExprCodegen<'a, 'b> {
                     };
                     self.builder.ins().icmp(cc, l, r)
                 } else {
-                    let l = self.to_float(lv);
-                    let r = self.to_float(rv);
+                    let l = self.coerce_float(lv);
+                    let r = self.coerce_float(rv);
                     let cc = match op {
                         BinOp::Gt => FloatCC::GreaterThan,
                         BinOp::Lt => FloatCC::LessThan,

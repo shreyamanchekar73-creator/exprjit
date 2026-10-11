@@ -1,5 +1,3 @@
-
-
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -69,7 +67,10 @@ pub struct Lexer<'a> {
 
 impl<'a> Lexer<'a> {
     pub fn new(src: &'a str) -> Self {
-        Lexer { src: src.as_bytes(), pos: 0 }
+        Lexer {
+            src: src.as_bytes(),
+            pos: 0,
+        }
     }
 
     fn peek(&self) -> Option<u8> {
@@ -107,7 +108,9 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-        let s = std::str::from_utf8(&self.src[start..self.pos]).unwrap().to_string();
+        let s = std::str::from_utf8(&self.src[start..self.pos])
+            .unwrap()
+            .to_string();
         Token::Ident(s)
     }
 
@@ -117,7 +120,10 @@ impl<'a> Lexer<'a> {
         while let Some(c) = self.peek() {
             if c.is_ascii_digit() {
                 self.pos += 1;
-            } else if c == b'.' && !is_float && matches!(self.peek2(), Some(d) if d.is_ascii_digit()) {
+            } else if c == b'.'
+                && !is_float
+                && matches!(self.peek2(), Some(d) if d.is_ascii_digit())
+            {
                 is_float = true;
                 self.pos += 1;
             } else {
@@ -126,13 +132,15 @@ impl<'a> Lexer<'a> {
         }
         let text = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
         if is_float {
-            text.parse::<f64>()
-                .map(Token::Float)
-                .map_err(|e| LexError { message: format!("invalid float literal: {e}"), pos: start })
+            text.parse::<f64>().map(Token::Float).map_err(|e| LexError {
+                message: format!("invalid float literal: {e}"),
+                pos: start,
+            })
         } else {
-            text.parse::<i64>()
-                .map(Token::Int)
-                .map_err(|e| LexError { message: format!("invalid integer literal: {e}"), pos: start })
+            text.parse::<i64>().map(Token::Int).map_err(|e| LexError {
+                message: format!("invalid integer literal: {e}"),
+                pos: start,
+            })
         }
     }
 
@@ -150,11 +158,19 @@ impl<'a> Lexer<'a> {
                     Some(b'\\') => s.push('\\'),
                     Some(c) => s.push(c as char),
                     None => {
-                        return Err(LexError { message: "unterminated escape in string literal".into(), pos: quote_pos })
+                        return Err(LexError {
+                            message: "unterminated escape in string literal".into(),
+                            pos: quote_pos,
+                        })
                     }
                 },
                 Some(c) => s.push(c as char),
-                None => return Err(LexError { message: "unterminated string literal".into(), pos: quote_pos }),
+                None => {
+                    return Err(LexError {
+                        message: "unterminated string literal".into(),
+                        pos: quote_pos,
+                    })
+                }
             }
         }
     }
@@ -162,7 +178,9 @@ impl<'a> Lexer<'a> {
     pub fn next_token(&mut self) -> Result<Token, LexError> {
         self.skip_whitespace();
         let start = self.pos;
-        let Some(c) = self.peek() else { return Ok(Token::Eof) };
+        let Some(c) = self.peek() else {
+            return Ok(Token::Eof);
+        };
 
         match c {
             b'(' => {
@@ -200,7 +218,10 @@ impl<'a> Lexer<'a> {
                     self.bump();
                     Ok(Token::EqEq)
                 } else {
-                    Err(LexError { message: "unexpected `=` (did you mean `==`?)".into(), pos: start })
+                    Err(LexError {
+                        message: "unexpected `=` (did you mean `==`?)".into(),
+                        pos: start,
+                    })
                 }
             }
             b'!' => {
@@ -218,7 +239,10 @@ impl<'a> Lexer<'a> {
                     self.bump();
                     Ok(Token::AndAnd)
                 } else {
-                    Err(LexError { message: "unexpected `&` (did you mean `&&`?)".into(), pos: start })
+                    Err(LexError {
+                        message: "unexpected `&` (did you mean `&&`?)".into(),
+                        pos: start,
+                    })
                 }
             }
             b'|' => {
@@ -227,10 +251,16 @@ impl<'a> Lexer<'a> {
                     self.bump();
                     Ok(Token::OrOr)
                 } else {
-                    Err(LexError { message: "unexpected `|` (did you mean `||`?)".into(), pos: start })
+                    Err(LexError {
+                        message: "unexpected `|` (did you mean `||`?)".into(),
+                        pos: start,
+                    })
                 }
             }
-            other => Err(LexError { message: format!("unexpected character '{}'", other as char), pos: start }),
+            other => Err(LexError {
+                message: format!("unexpected character '{}'", other as char),
+                pos: start,
+            }),
         }
     }
 

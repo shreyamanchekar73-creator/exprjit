@@ -1,5 +1,3 @@
-
-
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -50,17 +48,10 @@ fn sample_batch() -> Result<RecordBatch> {
 
     let age = Int64Array::from((0..20i64).collect::<Vec<_>>());
 
-    let score = Float64Array::from(
-        (0..20)
-            .map(|i| i as f64 * 1.3)
-            .collect::<Vec<_>>(),
-    );
+    let score = Float64Array::from((0..20).map(|i| i as f64 * 1.3).collect::<Vec<_>>());
 
-    RecordBatch::try_new(
-        schema,
-        vec![Arc::new(age), Arc::new(score)],
-    )
-    .context("building sample batch")
+    RecordBatch::try_new(schema, vec![Arc::new(age), Arc::new(score)])
+        .context("building sample batch")
 }
 
 /// Display columns and data types.
@@ -70,11 +61,7 @@ fn list_columns(batch: &RecordBatch) {
     let schema = batch.schema();
 
     for field in schema.fields().iter() {
-        println!(
-            "  {:<20} {:?}",
-            field.name(),
-            field.data_type()
-        );
+        println!("  {:<20} {:?}", field.name(), field.data_type());
     }
 
     println!("rows: {}", batch.num_rows());
@@ -127,10 +114,7 @@ fn parse_args() -> Result<Args> {
 }
 
 /// Run the interpreter version of the query.
-fn interpreter_filter(
-    batch: &RecordBatch,
-    expr: &Expr,
-) -> Result<(Vec<u32>, std::time::Duration)> {
+fn interpreter_filter(batch: &RecordBatch, expr: &Expr) -> Result<(Vec<u32>, std::time::Duration)> {
     let mut kept = Vec::new();
 
     let started = Instant::now();
@@ -148,11 +132,7 @@ fn interpreter_filter(
                         .column(col_idx)
                         .as_any()
                         .downcast_ref::<Int64Array>()
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "failed to read Int64 column"
-                            )
-                        })?;
+                        .ok_or_else(|| anyhow::anyhow!("failed to read Int64 column"))?;
 
                     Value::Int(arr.value(row_idx))
                 }
@@ -162,30 +142,20 @@ fn interpreter_filter(
                         .column(col_idx)
                         .as_any()
                         .downcast_ref::<Float64Array>()
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "failed to read Float64 column"
-                            )
-                        })?;
+                        .ok_or_else(|| anyhow::anyhow!("failed to read Float64 column"))?;
 
                     Value::Float(arr.value(row_idx))
                 }
 
                 other => {
-                    anyhow::bail!(
-                        "interpreter does not support {other:?}"
-                    );
+                    anyhow::bail!("interpreter does not support {other:?}");
                 }
             };
 
             row.insert(field.name().as_str(), value);
         }
 
-        if interp::eval_bool(expr, &row)
-            .with_context(|| {
-                format!("interpreting row {row_idx}")
-            })?
-        {
+        if interp::eval_bool(expr, &row).with_context(|| format!("interpreting row {row_idx}"))? {
             kept.push(row_idx as u32);
         }
     }
@@ -218,7 +188,11 @@ fn js_escape(value: &str) -> String {
 }
 
 /// Write the latest query result to dashboard_data.js.
-fn write_dashboard_data(stats: &QueryStats, compiled_shapes: usize, cold_compile_us: f64) -> Result<()> {
+fn write_dashboard_data(
+    stats: &QueryStats,
+    compiled_shapes: usize,
+    cold_compile_us: f64,
+) -> Result<()> {
     let indices = stats
         .indices
         .iter()
@@ -227,7 +201,7 @@ fn write_dashboard_data(stats: &QueryStats, compiled_shapes: usize, cold_compile
         .join(", ");
 
     let js = format!(
-r#"window.EXPRJIT_DATA = {{
+        r#"window.EXPRJIT_DATA = {{
     query: "{}",
     totalRows: {},
     matchedRows: {},
@@ -259,8 +233,7 @@ r#"window.EXPRJIT_DATA = {{
         indices
     );
 
-    fs::write("dashboard_data.js", js)
-        .context("writing dashboard_data.js")?;
+    fs::write("dashboard_data.js", js).context("writing dashboard_data.js")?;
 
     Ok(())
 }
@@ -281,9 +254,7 @@ fn run_query(
 
     let compiled = engine
         .compile_query(query, batch)
-        .with_context(|| {
-            format!("compiling query `{query}`")
-        })?;
+        .with_context(|| format!("compiling query `{query}`"))?;
 
     // ------------------------------------------------------------
     // 2. JIT EXECUTION
@@ -293,9 +264,7 @@ fn run_query(
 
     let kept = compiled
         .filter(batch)
-        .with_context(|| {
-            format!("running query `{query}`")
-        })?;
+        .with_context(|| format!("running query `{query}`"))?;
 
     let jit_time = started.elapsed();
 
@@ -305,20 +274,16 @@ fn run_query(
 
     let expr = parse(query)
         .map_err(|e| anyhow::anyhow!(e.to_string()))
-        .context(
-            "parsing query for interpreter comparison",
-        )?;
+        .context("parsing query for interpreter comparison")?;
 
-    let (interp_kept, interp_time) =
-        interpreter_filter(batch, &expr)?;
+    let (interp_kept, interp_time) = interpreter_filter(batch, &expr)?;
 
     // ------------------------------------------------------------
     // 4. SPEEDUP
     // ------------------------------------------------------------
 
     let speedup = if jit_time.as_nanos() > 0 {
-        interp_time.as_secs_f64()
-            / jit_time.as_secs_f64()
+        interp_time.as_secs_f64() / jit_time.as_secs_f64()
     } else {
         0.0
     };
@@ -327,19 +292,12 @@ fn run_query(
     // 5. CACHE
     // ------------------------------------------------------------
 
-    let cache_status = if compiled.cache_hit {
-        "HIT"
-    } else {
-        "MISS"
-    };
+    let cache_status = if compiled.cache_hit { "HIT" } else { "MISS" };
 
     let compile_status = if compiled.cache_hit {
         "cache hit - reused compiled code".to_string()
     } else {
-        format!(
-            "compiled in {:.2?}",
-            compiled.compile_time
-        )
+        format!("compiled in {:.2?}", compiled.compile_time)
     };
 
     // ------------------------------------------------------------
@@ -349,29 +307,21 @@ fn run_query(
     let match_pct = if batch.num_rows() == 0 {
         0.0
     } else {
-        kept.len() as f64 * 100.0
-            / batch.num_rows() as f64
+        kept.len() as f64 * 100.0 / batch.num_rows() as f64
     };
 
     // ------------------------------------------------------------
     // 7. CORRECTNESS
     // ------------------------------------------------------------
 
-    let correctness = if kept == interp_kept {
-        "PASS"
-    } else {
-        "FAIL"
-    };
+    let correctness = if kept == interp_kept { "PASS" } else { "FAIL" };
 
     // Compilation time in microseconds.
-    let compile_us =
-        compiled.compile_time.as_secs_f64() * 1_000_000.0;
+    let compile_us = compiled.compile_time.as_secs_f64() * 1_000_000.0;
 
-    let jit_us =
-        jit_time.as_secs_f64() * 1_000_000.0;
+    let jit_us = jit_time.as_secs_f64() * 1_000_000.0;
 
-    let interpreter_us =
-        interp_time.as_secs_f64() * 1_000_000.0;
+    let interpreter_us = interp_time.as_secs_f64() * 1_000_000.0;
 
     // ------------------------------------------------------------
     // DISPLAY
@@ -386,61 +336,31 @@ fn run_query(
 
     println!("------------------------------------------------------------");
 
-    println!(
-        "Total Rows         : {}",
-        batch.num_rows()
-    );
+    println!("Total Rows         : {}", batch.num_rows());
 
-    println!(
-        "Rows Matched       : {}",
-        kept.len()
-    );
+    println!("Rows Matched       : {}", kept.len());
 
-    println!(
-        "Match Percentage   : {:.1}%",
-        match_pct
-    );
+    println!("Match Percentage   : {:.1}%", match_pct);
 
     println!("------------------------------------------------------------");
 
-    println!(
-        "Compilation        : {}",
-        compile_status
-    );
+    println!("Compilation        : {}", compile_status);
 
-    println!(
-        "Cache Status       : {}",
-        cache_status
-    );
+    println!("Cache Status       : {}", cache_status);
 
     println!("------------------------------------------------------------");
 
-    println!(
-        "JIT Execution      : {:.2?}",
-        jit_time
-    );
+    println!("JIT Execution      : {:.2?}", jit_time);
 
-    println!(
-        "Interpreter Time   : {:.2?}",
-        interp_time
-    );
+    println!("Interpreter Time   : {:.2?}", interp_time);
 
-    println!(
-        "JIT Speedup        : {:.2}x",
-        speedup
-    );
+    println!("JIT Speedup        : {:.2}x", speedup);
 
     println!("------------------------------------------------------------");
 
-    println!(
-        "Correctness        : {}",
-        correctness
-    );
+    println!("Correctness        : {}", correctness);
 
-    println!(
-        "Matched Row Indexes: {:?}",
-        kept
-    );
+    println!("Matched Row Indexes: {:?}", kept);
 
     println!("============================================================");
 
@@ -471,12 +391,7 @@ fn run() -> Result<()> {
 
     // LOAD DATA
     let batch = match &args.csv_path {
-        Some(path) => {
-            load_csv(path)
-                .with_context(|| {
-                    format!("loading CSV from {path}")
-                })?
-        }
+        Some(path) => load_csv(path).with_context(|| format!("loading CSV from {path}"))?,
 
         None => sample_batch()?,
     };
@@ -490,10 +405,7 @@ fn run() -> Result<()> {
     // QUERY
     let query = args
         .query
-        .unwrap_or_else(|| {
-            "age > 10 && score < 20.0"
-                .to_string()
-        });
+        .unwrap_or_else(|| "age > 10 && score < 20.0".to_string());
 
     // ENGINE
     let mut engine = Engine::new();
@@ -502,12 +414,7 @@ fn run() -> Result<()> {
     // FIRST RUN
     // ------------------------------------------------------------
 
-    let stats = run_query(
-        &mut engine,
-        &batch,
-        &query,
-        "run 1 (cold)",
-    )?;
+    let stats = run_query(&mut engine, &batch, &query, "run 1 (cold)")?;
 
     // ------------------------------------------------------------
     // WRITE DASHBOARD DATA
@@ -521,12 +428,7 @@ fn run() -> Result<()> {
     // SECOND RUN
     // ------------------------------------------------------------
 
-    let stats = run_query(
-        &mut engine,
-        &batch,
-        &query,
-        "run 2 (warm)",
-    )?;
+    let stats = run_query(&mut engine, &batch, &query, "run 2 (warm)")?;
 
     // Update dashboard with the latest/warm result (cold compile time kept).
     write_dashboard_data(&stats, engine.compiled_shape_count(), cold_compile_us)?;

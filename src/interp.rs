@@ -26,17 +26,20 @@ impl fmt::Display for EvalError {
 impl std::error::Error for EvalError {}
 
 fn err(msg: impl Into<String>) -> EvalError {
-    EvalError { message: msg.into() }
+    EvalError {
+        message: msg.into(),
+    }
 }
 
 /// One row's worth of column values, keyed by column name.
 pub type Row<'a> = HashMap<&'a str, Value>;
 
-
 pub fn eval_bool(expr: &Expr, row: &Row) -> Result<bool, EvalError> {
     match eval(expr, row)? {
         Value::Bool(b) => Ok(b),
-        other => Err(err(format!("expected a boolean-valued expression, got {other:?}"))),
+        other => Err(err(format!(
+            "expected a boolean-valued expression, got {other:?}"
+        ))),
     }
 }
 

@@ -31,10 +31,15 @@ fn build_batch() -> RecordBatch {
     let b_vals: Vec<f64> = vec![
         -2.5, 0.0, 5.0, 4.999, 5.001, 100.0, -3.3, 2.2, 8.8, 5.0, 1.0, 9.9, 0.1, -0.1, 5.5,
     ];
-    assert_eq!(a_vals.len(), b_vals.len(), "test fixture columns must be the same length");
+    assert_eq!(
+        a_vals.len(),
+        b_vals.len(),
+        "test fixture columns must be the same length"
+    );
     let col_a = Int64Array::from(a_vals);
     let col_b = Float64Array::from(b_vals);
-    RecordBatch::try_new(schema, vec![Arc::new(col_a), Arc::new(col_b)]).expect("building test batch")
+    RecordBatch::try_new(schema, vec![Arc::new(col_a), Arc::new(col_b)])
+        .expect("building test batch")
 }
 
 /// Pull row `row_idx` out of `batch` as owned (name, Value) pairs. Kept
@@ -102,14 +107,21 @@ fn jit_and_interpreter_agree_on_every_row() {
             .compile_expr(&expr, &batch)
             .unwrap_or_else(|e| panic!("failed to JIT-compile `{query}`: {e}"));
 
-        let jit_matches: HashSet<u32> = compiled.filter(&batch).expect("jit filter failed").into_iter().collect();
+        let jit_matches: HashSet<u32> = compiled
+            .filter(&batch)
+            .expect("jit filter failed")
+            .into_iter()
+            .collect();
 
         for row_idx in 0..batch.num_rows() {
             let values = row_values(&batch, row_idx);
-            let row: Row = values.iter().map(|(k, v)| (k.as_str(), v.clone())).collect::<HashMap<_, _>>();
+            let row: Row = values
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.clone()))
+                .collect::<HashMap<_, _>>();
 
-            let interp_result =
-                eval_bool(&expr, &row).unwrap_or_else(|e| panic!("interpreter failed on `{query}` row {row_idx}: {e}"));
+            let interp_result = eval_bool(&expr, &row)
+                .unwrap_or_else(|e| panic!("interpreter failed on `{query}` row {row_idx}: {e}"));
             let jit_result = jit_matches.contains(&(row_idx as u32));
 
             if interp_result != jit_result {
