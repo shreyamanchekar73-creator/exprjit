@@ -1,16 +1,16 @@
 window.EXPRJIT_DATA = {
-    query: " age > 10",
+    query: "age > 10 && score < 20.0",
     totalRows: 20,
-    matchedRows: 9,
-    matchPct: 45.00,
-    coldCompileUs: 0.00,
+    matchedRows: 5,
+    matchPct: 25.00,
+    coldCompileUs: 3440.20,
     warmCompileUs: 0,
     compileUs: 0.00,
-    jitUs: 12.30,
-    interpreterUs: 77.40,
-    speedup: 6.29,
+    jitUs: 12.80,
+    interpreterUs: 55.60,
+    speedup: 4.34,
     cacheStatus: "HIT",
     correctness: "PASS",
     compiledShapes: 1,
-    indices: [11, 12, 13, 14, 15, 16, 17, 18, 19]
+    indices: [11, 12, 13, 14, 15]
 };

@@ -6,7 +6,7 @@ use arrow::array::{Float64Array, Int64Array};
 use arrow::datatypes::DataType;
 use arrow::record_batch::RecordBatch;
 
-use crate::ast::Expr;
+use crate::ast::{BinOp, Expr};
 use crate::jit::{ColType, CompiledFilterFn, Jit, Schema};
 use crate::parser::parse;
 
@@ -51,10 +51,18 @@ impl Engine {
     /// has an `Expr` (e.g. built programmatically, as in the benchmarks).
     pub fn compile_expr(&mut self, expr: &Expr, batch: &RecordBatch) -> Result<CompiledQuery> {
         let schema = schema_from_batch(batch)?;
-        let key = format!("{}|{}", schema_cache_key(&schema), expr_cache_key(expr));
+
+        // FIX 1: validate before handing the AST to Cranelift, so bad queries
+        // return a normal error instead of panicking inside jit.rs.
+        if check_expr(expr, &schema)? != Kind::Bool {
+            bail!("query must be a boolean expression, e.g. `age > 18`");
+        }
+
+        let schema_key = schema_cache_key(&schema);
+        let key = format!("{}|{}", schema_key, expr_cache_key(expr));
 
         if let Some(&compiled) = self.cache.get(&key) {
-            return Ok(CompiledQuery { compiled, compile_time: Duration::ZERO, cache_hit: true });
+            return Ok(CompiledQuery { compiled, compile_time: Duration::ZERO, cache_hit: true, schema_key });
         }
 
         let started = Instant::now();
@@ -64,7 +72,7 @@ impl Engine {
         let compile_time = started.elapsed();
 
         self.cache.insert(key, compiled);
-        Ok(CompiledQuery { compiled, compile_time, cache_hit: false })
+        Ok(CompiledQuery { compiled, compile_time, cache_hit: false, schema_key })
     }
 }
 
@@ -76,12 +84,24 @@ pub struct CompiledQuery {
     /// Whether this call reused a previously-compiled function for the same
     /// query shape, rather than invoking Cranelift again.
     pub cache_hit: bool,
+    /// FIX 3: the column layout this function was compiled for. `filter`
+    /// refuses to run against a batch with a different layout.
+    schema_key: String,
 }
 
 impl CompiledQuery {
     /// Run the compiled predicate over every row of `batch`, returning the
     /// (0-based) indices of rows that matched.
     pub fn filter(&self, batch: &RecordBatch) -> Result<Vec<u32>> {
+        let batch_key = schema_cache_key(&schema_from_batch(batch)?);
+        if batch_key != self.schema_key {
+            bail!(
+                "this query was compiled for a different column layout \
+                 (compiled for [{}], got [{}]); recompile it against this batch",
+                self.schema_key,
+                batch_key
+            );
+        }
         let col_ptrs = column_pointers(batch)?;
         let mut kept = Vec::new();
         for row in 0..batch.num_rows() {
@@ -98,6 +118,46 @@ impl CompiledQuery {
         }
         Ok(kept)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Num,
+    Bool,
+}
+
+/// Type-check an expression against the schema. Returns an error for every
+/// case that `jit.rs` would otherwise panic on.
+fn check_expr(expr: &Expr, schema: &Schema) -> Result<Kind> {
+    Ok(match expr {
+        Expr::Column(name) => {
+            if !schema.columns.contains_key(name) {
+                bail!("unknown column `{name}`");
+            }
+            Kind::Num
+        }
+        Expr::IntLit(_) | Expr::FloatLit(_) => Kind::Num,
+        Expr::StrLit(_) => bail!("string literals are not supported by the JIT path (only Int64/Float64 columns)"),
+        Expr::Unary(_, inner) => {
+            if check_expr(inner, schema)? != Kind::Bool {
+                bail!("`!` must be applied to a true/false expression, e.g. `!(age > 5)`");
+            }
+            Kind::Bool
+        }
+        Expr::Binary(lhs, op, rhs) => {
+            let l = check_expr(lhs, schema)?;
+            let r = check_expr(rhs, schema)?;
+            let want = if matches!(op, BinOp::And | BinOp::Or) { Kind::Bool } else { Kind::Num };
+            if l != want || r != want {
+                if want == Kind::Bool {
+                    bail!("`&&` / `||` need true/false expressions on both sides");
+                } else {
+                    bail!("comparison {op:?} needs a column or number on both sides");
+                }
+            }
+            Kind::Bool
+        }
+    })
 }
 
 /// Canonical string encoding of an `Expr`'s exact shape -- used as (part of)
@@ -180,4 +240,81 @@ fn column_pointers(batch: &RecordBatch) -> Result<Vec<*const u8>> {
         ptrs.push(ptr);
     }
     Ok(ptrs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow::datatypes::{Field, Schema as ArrowSchema};
+    use std::sync::Arc;
+
+    fn sample() -> RecordBatch {
+        let schema = Arc::new(ArrowSchema::new(vec![
+            Field::new("age", DataType::Int64, false),
+            Field::new("score", DataType::Float64, false),
+        ]));
+        RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from(vec![1, 2, 3])),
+                Arc::new(Float64Array::from(vec![1.0, 2.0, 3.0])),
+            ],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn unknown_column_is_an_error_not_a_panic() {
+        let mut e = Engine::new();
+        assert!(e.compile_query("bonus > 5", &sample()).is_err());
+    }
+
+    #[test]
+    fn string_literal_is_an_error_not_a_panic() {
+        let mut e = Engine::new();
+        assert!(e.compile_query(r#"age == "x""#, &sample()).is_err());
+    }
+
+    #[test]
+    fn non_boolean_query_is_an_error() {
+        let mut e = Engine::new();
+        assert!(e.compile_query("age", &sample()).is_err());
+    }
+
+    #[test]
+    fn boolean_inside_comparison_is_an_error() {
+        let mut e = Engine::new();
+        assert!(e.compile_query("(age > 1) > 2", &sample()).is_err());
+        assert!(e.compile_query("age && score", &sample()).is_err());
+    }
+
+    #[test]
+    fn repeated_query_hits_cache() {
+        let mut e = Engine::new();
+        let b = sample();
+        assert!(!e.compile_query("age > 1", &b).unwrap().cache_hit);
+        assert!(e.compile_query("age > 1", &b).unwrap().cache_hit);
+        assert_eq!(e.compiled_shape_count(), 1);
+    }
+
+    #[test]
+    fn filter_rejects_batch_with_different_layout() {
+        let mut e = Engine::new();
+        let q = e.compile_query("age > 1", &sample()).unwrap();
+        // same columns, different order -> different layout
+        let schema = Arc::new(ArrowSchema::new(vec![
+            Field::new("score", DataType::Float64, false),
+            Field::new("age", DataType::Int64, false),
+        ]));
+        let other = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Float64Array::from(vec![1.0, 2.0, 3.0])),
+                Arc::new(Int64Array::from(vec![1, 2, 3])),
+            ],
+        )
+        .unwrap();
+        assert!(q.filter(&other).is_err());
+        assert_eq!(q.filter(&sample()).unwrap(), vec![1, 2]);
+    }
 }

@@ -30,7 +30,7 @@ USAGE:
 QUERY SYNTAX:
     Comparisons: >  <  >=  <=  ==  !=
     Logic:       &&  ||  !
-    Values:      column names, integer/float literals, "quoted strings"
+    Values:      column names, integer/float literals
     Grouping:    ( ... )
 
 EXAMPLES:
@@ -89,7 +89,7 @@ struct Args {
 }
 
 /// Parse command-line arguments.
-fn parse_args() -> Args {
+fn parse_args() -> Result<Args> {
     let mut args = Args {
         csv_path: None,
         query: None,
@@ -102,7 +102,11 @@ fn parse_args() -> Args {
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--csv" => {
-                args.csv_path = it.next();
+                // FIX: don't silently swallow the query as the file path.
+                match it.next() {
+                    Some(p) if !p.starts_with("--") => args.csv_path = Some(p),
+                    _ => anyhow::bail!("--csv needs a file path, e.g. --csv data.csv"),
+                }
             }
 
             "--list-columns" => {
@@ -119,7 +123,7 @@ fn parse_args() -> Args {
         }
     }
 
-    args
+    Ok(args)
 }
 
 /// Run the interpreter version of the query.
@@ -214,7 +218,7 @@ fn js_escape(value: &str) -> String {
 }
 
 /// Write the latest query result to dashboard_data.js.
-fn write_dashboard_data(stats: &QueryStats, compiled_shapes: usize) -> Result<()> {
+fn write_dashboard_data(stats: &QueryStats, compiled_shapes: usize, cold_compile_us: f64) -> Result<()> {
     let indices = stats
         .indices
         .iter()
@@ -244,7 +248,7 @@ r#"window.EXPRJIT_DATA = {{
         stats.total_rows,
         stats.matched_rows,
         stats.match_pct,
-        stats.compile_us,
+        cold_compile_us,
         stats.compile_us,
         stats.jit_us,
         stats.interpreter_us,
@@ -457,7 +461,7 @@ fn run_query(
 
 /// Main program.
 fn run() -> Result<()> {
-    let args = parse_args();
+    let args = parse_args()?;
 
     // HELP
     if args.help {
@@ -509,7 +513,9 @@ fn run() -> Result<()> {
     // WRITE DASHBOARD DATA
     // ------------------------------------------------------------
 
-    write_dashboard_data(&stats, engine.compiled_shape_count())?;
+    // FIX 2: remember the cold compile time; the warm run's is always 0.
+    let cold_compile_us = stats.compile_us;
+    write_dashboard_data(&stats, engine.compiled_shape_count(), cold_compile_us)?;
 
     // ------------------------------------------------------------
     // SECOND RUN
@@ -522,8 +528,8 @@ fn run() -> Result<()> {
         "run 2 (warm)",
     )?;
 
-    // Update dashboard with the latest/warm result.
-    write_dashboard_data(&stats, engine.compiled_shape_count())?;
+    // Update dashboard with the latest/warm result (cold compile time kept).
+    write_dashboard_data(&stats, engine.compiled_shape_count(), cold_compile_us)?;
 
     // ------------------------------------------------------------
     // SESSION STATISTICS
