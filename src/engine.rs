@@ -7,7 +7,7 @@ use arrow::datatypes::DataType;
 use arrow::record_batch::RecordBatch;
 
 use crate::ast::{BinOp, Expr};
-use crate::jit::{ColType, CompiledFilterFn, Jit, Schema};
+use crate::jit::{ColType, CompiledLoopFn, Jit, Schema};
 use crate::parser::parse;
 
 pub struct Engine {
@@ -19,7 +19,7 @@ pub struct Engine {
     /// newly-compiled (i.e. cache-miss) query gets a distinct symbol name.
     next_query_id: u64,
     /// Query-shape -> compiled function. See the module doc comment above.
-    cache: HashMap<String, CompiledFilterFn>,
+    cache: HashMap<String, CompiledLoopFn>,
 }
 
 impl Default for Engine {
@@ -79,7 +79,7 @@ impl Engine {
         let started = Instant::now();
         let fn_name = format!("query_pred_{}", self.next_query_id);
         self.next_query_id += 1;
-        let compiled = self.jit.compile(expr, &schema, &fn_name);
+        let compiled = self.jit.compile_loop(expr, &schema, &fn_name);
         let compile_time = started.elapsed();
 
         self.cache.insert(key, compiled);
@@ -93,7 +93,7 @@ impl Engine {
 }
 
 pub struct CompiledQuery {
-    compiled: CompiledFilterFn,
+    compiled: CompiledLoopFn,
     /// Wall-clock time spent in Cranelift compilation for this call.
     /// `Duration::ZERO` when `cache_hit` is true (no compilation happened).
     pub compile_time: Duration,
@@ -106,8 +106,9 @@ pub struct CompiledQuery {
 }
 
 impl CompiledQuery {
-    /// Run the compiled predicate over every row of `batch`, returning the
-    /// (0-based) indices of rows that matched.
+    /// Run the compiled filter loop over every row of `batch`, returning the
+    /// (0-based) indices of rows that matched. The whole loop runs as native
+    /// code; Rust only prepares the column pointers and the output buffer.
     pub fn filter(&self, batch: &RecordBatch) -> Result<Vec<u32>> {
         let batch_key = schema_cache_key(&schema_from_batch(batch)?);
         if batch_key != self.schema_key {
@@ -118,21 +119,24 @@ impl CompiledQuery {
                 batch_key
             );
         }
-        let col_ptrs = column_pointers(batch)?;
-        let mut kept = Vec::new();
-        for row in 0..batch.num_rows() {
-            // SAFETY: `col_ptrs[i]` points at the start of a contiguous,
-            // correctly-typed buffer of at least `batch.num_rows()`
-            // elements for every column referenced by `schema` (enforced
-            // by `column_pointers` walking every column in the batch,
-            // which is exactly what `schema_from_batch` indexed against),
-            // and `row` is in `0..batch.num_rows()`.
-            let keep = unsafe { (self.compiled)(col_ptrs.as_ptr(), row as i64) };
-            if keep != 0 {
-                kept.push(row as u32);
-            }
+        let n = batch.num_rows();
+        if n > u32::MAX as usize {
+            bail!(
+                "batch has {n} rows; row indexes are u32, so at most {} are supported",
+                u32::MAX
+            );
         }
-        Ok(kept)
+        let col_ptrs = column_pointers(batch)?;
+        let mut out = vec![0u32; n];
+        // SAFETY: `col_ptrs[i]` points at the start of a contiguous,
+        // correctly-typed, null-free buffer of at least `n` elements for
+        // every column (checked by `column_pointers`), and the schema key
+        // check above guarantees this batch has the layout the function was
+        // compiled for. `out` has room for `n` u32 values, and the compiled
+        // loop writes at most one entry per row.
+        let count = unsafe { (self.compiled)(col_ptrs.as_ptr(), n as i64, out.as_mut_ptr()) };
+        out.truncate(count as usize);
+        Ok(out)
     }
 }
 
@@ -340,5 +344,46 @@ mod tests {
         .unwrap();
         assert!(q.filter(&other).is_err());
         assert_eq!(q.filter(&sample()).unwrap(), vec![1, 2]);
+    }
+
+    #[test]
+    fn compiled_loop_matches_expected_rows_on_larger_batch() {
+        let rows = 1000usize;
+        let schema = Arc::new(ArrowSchema::new(vec![
+            Field::new("age", DataType::Int64, false),
+            Field::new("score", DataType::Float64, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from((0..rows as i64).collect::<Vec<_>>())),
+                Arc::new(Float64Array::from(
+                    (0..rows).map(|i| i as f64).collect::<Vec<_>>(),
+                )),
+            ],
+        )
+        .unwrap();
+        let mut e = Engine::new();
+        let q = e.compile_query("age > 10 && score < 20.0", &batch).unwrap();
+        assert_eq!(q.filter(&batch).unwrap(), (11..20).collect::<Vec<u32>>());
+    }
+
+    #[test]
+    fn filter_on_empty_batch_returns_nothing() {
+        let schema = Arc::new(ArrowSchema::new(vec![
+            Field::new("age", DataType::Int64, false),
+            Field::new("score", DataType::Float64, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from(Vec::<i64>::new())),
+                Arc::new(Float64Array::from(Vec::<f64>::new())),
+            ],
+        )
+        .unwrap();
+        let mut e = Engine::new();
+        let q = e.compile_query("age > 1", &batch).unwrap();
+        assert!(q.filter(&batch).unwrap().is_empty());
     }
 }

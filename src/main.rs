@@ -21,6 +21,7 @@ const USAGE: &str = r#"exprjit - JIT-compiled query filtering over Arrow record 
 USAGE:
     exprjit                                Run a demo query
     exprjit "<query>"                      Run a custom query
+    exprjit --rows <n> "<query>"           Use n synthetic rows (default 20)
     exprjit --csv <path> "<query>"         Load CSV and run query
     exprjit --csv <path> --list-columns    Show CSV columns
     exprjit --help                         Show this message
@@ -36,19 +37,22 @@ EXAMPLES:
     age > 10 && score < 20.0
     age > 15 || score > 15.0
     (age > 10) && (score > 5.0)
+
+TIP:
+    Use `cargo run --release` for meaningful timings, and --rows 1000000
+    so there is enough data for the speedup to show.
 "#;
 
-/// Built-in demo data:
-/// 20 rows containing age and score.
-fn sample_batch() -> Result<RecordBatch> {
+/// Built-in demo data: `rows` rows containing age (0..rows) and score (age * 1.3).
+fn sample_batch(rows: usize) -> Result<RecordBatch> {
     let schema = Arc::new(ArrowSchema::new(vec![
         Field::new("age", DataType::Int64, false),
         Field::new("score", DataType::Float64, false),
     ]));
 
-    let age = Int64Array::from((0..20i64).collect::<Vec<_>>());
+    let age = Int64Array::from((0..rows as i64).collect::<Vec<_>>());
 
-    let score = Float64Array::from((0..20).map(|i| i as f64 * 1.3).collect::<Vec<_>>());
+    let score = Float64Array::from((0..rows).map(|i| i as f64 * 1.3).collect::<Vec<_>>());
 
     RecordBatch::try_new(schema, vec![Arc::new(age), Arc::new(score)])
         .context("building sample batch")
@@ -70,6 +74,7 @@ fn list_columns(batch: &RecordBatch) {
 /// Command-line arguments.
 struct Args {
     csv_path: Option<String>,
+    rows: Option<usize>,
     query: Option<String>,
     list_columns: bool,
     help: bool,
@@ -79,6 +84,7 @@ struct Args {
 fn parse_args() -> Result<Args> {
     let mut args = Args {
         csv_path: None,
+        rows: None,
         query: None,
         list_columns: false,
         help: false,
@@ -88,12 +94,22 @@ fn parse_args() -> Result<Args> {
 
     while let Some(arg) = it.next() {
         match arg.as_str() {
-            "--csv" => {
-                // FIX: don't silently swallow the query as the file path.
-                match it.next() {
-                    Some(p) if !p.starts_with("--") => args.csv_path = Some(p),
-                    _ => anyhow::bail!("--csv needs a file path, e.g. --csv data.csv"),
+            "--csv" => match it.next() {
+                Some(p) if !p.starts_with("--") => args.csv_path = Some(p),
+                _ => anyhow::bail!("--csv needs a file path, e.g. --csv data.csv"),
+            },
+
+            "--rows" => {
+                let value = it
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("--rows needs a number, e.g. --rows 1000000"))?;
+                let n: usize = value.parse().with_context(|| {
+                    format!("--rows must be a positive whole number, got `{value}`")
+                })?;
+                if n == 0 {
+                    anyhow::bail!("--rows must be at least 1");
                 }
+                args.rows = Some(n);
             }
 
             "--list-columns" => {
@@ -114,45 +130,49 @@ fn parse_args() -> Result<Args> {
 }
 
 /// Run the interpreter version of the query.
+///
+/// Columns are resolved once and a single row map is reused for every row,
+/// so the timing reflects expression evaluation rather than per-row
+/// allocation.
 fn interpreter_filter(batch: &RecordBatch, expr: &Expr) -> Result<(Vec<u32>, std::time::Duration)> {
-    let mut kept = Vec::new();
+    enum Col<'a> {
+        Int(&'a Int64Array),
+        Float(&'a Float64Array),
+    }
+
+    let schema = batch.schema();
+    let mut cols: Vec<(&str, Col<'_>)> = Vec::with_capacity(schema.fields().len());
+    for (idx, field) in schema.fields().iter().enumerate() {
+        let array = batch.column(idx);
+        let col = match array.data_type() {
+            DataType::Int64 => Col::Int(
+                array
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .ok_or_else(|| anyhow::anyhow!("failed to read Int64 column"))?,
+            ),
+            DataType::Float64 => Col::Float(
+                array
+                    .as_any()
+                    .downcast_ref::<Float64Array>()
+                    .ok_or_else(|| anyhow::anyhow!("failed to read Float64 column"))?,
+            ),
+            other => anyhow::bail!("interpreter does not support {other:?}"),
+        };
+        cols.push((field.name().as_str(), col));
+    }
 
     let started = Instant::now();
-
-    // Keep schema alive while using its fields.
-    let schema = batch.schema();
+    let mut kept = Vec::new();
+    let mut row: HashMap<&str, Value> = HashMap::with_capacity(cols.len());
 
     for row_idx in 0..batch.num_rows() {
-        let mut row: HashMap<&str, Value> = HashMap::new();
-
-        for (col_idx, field) in schema.fields().iter().enumerate() {
-            let value = match batch.column(col_idx).data_type() {
-                DataType::Int64 => {
-                    let arr = batch
-                        .column(col_idx)
-                        .as_any()
-                        .downcast_ref::<Int64Array>()
-                        .ok_or_else(|| anyhow::anyhow!("failed to read Int64 column"))?;
-
-                    Value::Int(arr.value(row_idx))
-                }
-
-                DataType::Float64 => {
-                    let arr = batch
-                        .column(col_idx)
-                        .as_any()
-                        .downcast_ref::<Float64Array>()
-                        .ok_or_else(|| anyhow::anyhow!("failed to read Float64 column"))?;
-
-                    Value::Float(arr.value(row_idx))
-                }
-
-                other => {
-                    anyhow::bail!("interpreter does not support {other:?}");
-                }
+        for (name, col) in &cols {
+            let value = match col {
+                Col::Int(a) => Value::Int(a.value(row_idx)),
+                Col::Float(a) => Value::Float(a.value(row_idx)),
             };
-
-            row.insert(field.name().as_str(), value);
+            row.insert(*name, value);
         }
 
         if interp::eval_bool(expr, &row).with_context(|| format!("interpreting row {row_idx}"))? {
@@ -187,18 +207,42 @@ fn js_escape(value: &str) -> String {
         .replace('\r', "\\r")
 }
 
-/// Write the latest query result to dashboard_data.js.
-fn write_dashboard_data(
-    stats: &QueryStats,
-    compiled_shapes: usize,
-    cold_compile_us: f64,
-) -> Result<()> {
-    let indices = stats
+/// Write the results of this session to dashboard_data.js.
+///
+/// The top-level fields describe the latest run (as before); `history`
+/// lists every run of the session, oldest first. `coldCompileUs` comes
+/// from the first run, because a cache hit compiles nothing.
+fn write_dashboard_data(runs: &[QueryStats], compiled_shapes: usize) -> Result<()> {
+    let (Some(first), Some(latest)) = (runs.first(), runs.last()) else {
+        anyhow::bail!("no runs to write to the dashboard");
+    };
+    let cold_compile_us = first.compile_us;
+
+    // Only a sample of indexes goes to the dashboard: with millions of rows
+    // the full list would make the file huge. `matchedRows` has the count.
+    let indices = latest
         .indices
         .iter()
+        .take(100)
         .map(|i| i.to_string())
         .collect::<Vec<_>>()
         .join(", ");
+
+    let history = runs
+        .iter()
+        .map(|r| {
+            format!(
+                r#"{{ query: "{}", rows: {}, matched: {}, cache: "{}", jitUs: {:.2}, interpreterUs: {:.2} }}"#,
+                js_escape(&r.query),
+                r.total_rows,
+                r.matched_rows,
+                r.cache_status,
+                r.jit_us,
+                r.interpreter_us
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",\n        ");
 
     let js = format!(
         r#"window.EXPRJIT_DATA = {{
@@ -215,22 +259,26 @@ fn write_dashboard_data(
     cacheStatus: "{}",
     correctness: "{}",
     compiledShapes: {},
-    indices: [{}]
+    indices: [{}],
+    history: [
+        {}
+    ]
 }};
 "#,
-        js_escape(&stats.query),
-        stats.total_rows,
-        stats.matched_rows,
-        stats.match_pct,
+        js_escape(&latest.query),
+        latest.total_rows,
+        latest.matched_rows,
+        latest.match_pct,
         cold_compile_us,
-        stats.compile_us,
-        stats.jit_us,
-        stats.interpreter_us,
-        stats.speedup,
-        stats.cache_status,
-        stats.correctness,
+        latest.compile_us,
+        latest.jit_us,
+        latest.interpreter_us,
+        latest.speedup,
+        latest.cache_status,
+        latest.correctness,
         compiled_shapes,
-        indices
+        indices,
+        history
     );
 
     fs::write("dashboard_data.js", js).context("writing dashboard_data.js")?;
@@ -360,7 +408,16 @@ fn run_query(
 
     println!("Correctness        : {}", correctness);
 
-    println!("Matched Row Indexes: {:?}", kept);
+    let shown: Vec<u32> = kept.iter().copied().take(20).collect();
+    if kept.len() > shown.len() {
+        println!(
+            "Matched Row Indexes: {:?} ... and {} more",
+            shown,
+            kept.len() - shown.len()
+        );
+    } else {
+        println!("Matched Row Indexes: {:?}", shown);
+    }
 
     println!("============================================================");
 
@@ -389,11 +446,18 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
-    // LOAD DATA
-    let batch = match &args.csv_path {
-        Some(path) => load_csv(path).with_context(|| format!("loading CSV from {path}"))?,
+    if cfg!(debug_assertions) {
+        eprintln!(
+            "note: debug build - timings are not representative. \
+             Use `cargo run --release` for real numbers."
+        );
+    }
 
-        None => sample_batch()?,
+    // LOAD DATA
+    let batch = match (&args.csv_path, args.rows) {
+        (Some(_), Some(_)) => anyhow::bail!("use either --csv or --rows, not both"),
+        (Some(path), None) => load_csv(path).with_context(|| format!("loading CSV from {path}"))?,
+        (None, rows) => sample_batch(rows.unwrap_or(20))?,
     };
 
     // LIST COLUMNS
@@ -410,28 +474,14 @@ fn run() -> Result<()> {
     // ENGINE
     let mut engine = Engine::new();
 
-    // ------------------------------------------------------------
-    // FIRST RUN
-    // ------------------------------------------------------------
+    // Run the same query twice: the first run compiles (cache MISS), the
+    // second reuses the compiled code (cache HIT).
+    let cold = run_query(&mut engine, &batch, &query, "run 1 (cold)")?;
+    let warm = run_query(&mut engine, &batch, &query, "run 2 (warm)")?;
 
-    let stats = run_query(&mut engine, &batch, &query, "run 1 (cold)")?;
-
-    // ------------------------------------------------------------
-    // WRITE DASHBOARD DATA
-    // ------------------------------------------------------------
-
-    // FIX 2: remember the cold compile time; the warm run's is always 0.
-    let cold_compile_us = stats.compile_us;
-    write_dashboard_data(&stats, engine.compiled_shape_count(), cold_compile_us)?;
-
-    // ------------------------------------------------------------
-    // SECOND RUN
-    // ------------------------------------------------------------
-
-    let stats = run_query(&mut engine, &batch, &query, "run 2 (warm)")?;
-
-    // Update dashboard with the latest/warm result (cold compile time kept).
-    write_dashboard_data(&stats, engine.compiled_shape_count(), cold_compile_us)?;
+    // WRITE DASHBOARD DATA (both runs, so the history has two rows)
+    let runs = [cold, warm];
+    write_dashboard_data(&runs, engine.compiled_shape_count())?;
 
     // ------------------------------------------------------------
     // SESSION STATISTICS

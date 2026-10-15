@@ -108,8 +108,9 @@ fn bench_interp_filter(c: &mut Criterion) {
     c.bench_function("interp_filter_10k_rows", |b| {
         b.iter(|| {
             let mut kept = 0usize;
+            // One reusable row map: the baseline measures evaluation, not allocation.
+            let mut row: Row = HashMap::with_capacity(2);
             for i in 0..a_vals.len() {
-                let mut row: Row = HashMap::new();
                 row.insert("a", Value::Int(a_vals[i]));
                 row.insert("b", Value::Float(b_vals[i]));
                 if eval_bool(&expr, &row).expect("interp eval") {

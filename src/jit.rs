@@ -19,8 +19,14 @@ pub struct Schema {
     pub columns: HashMap<String, (usize, ColType)>,
 }
 
-/// Signature of every compiled predicate.
+/// Signature of a compiled per-row predicate.
 pub type CompiledFilterFn = unsafe extern "C" fn(*const *const u8, i64) -> u8;
+
+/// Signature of a compiled *whole-loop* filter:
+/// `fn(columns, n_rows, out) -> match_count`.
+/// `out` must have room for `n_rows` u32 values; the first `match_count`
+/// entries are the matching row indexes.
+pub type CompiledLoopFn = unsafe extern "C" fn(*const *const u8, i64, *mut u32) -> i64;
 
 pub struct Jit {
     module: JITModule,
@@ -97,6 +103,99 @@ impl Jit {
 
         let code_ptr = self.module.get_finalized_function(func_id);
         unsafe { std::mem::transmute::<*const u8, CompiledFilterFn>(code_ptr) }
+    }
+
+    /// Compile `expr` into a native function that runs the *entire* filter
+    /// loop: for every row it evaluates the predicate and records the row
+    /// index when it matches. No Rust code runs between rows.
+    pub fn compile_loop(&mut self, expr: &Expr, schema: &Schema, fn_name: &str) -> CompiledLoopFn {
+        let mut ctx = self.module.make_context();
+        let mut fn_builder_ctx = FunctionBuilderContext::new();
+
+        let ptr_type = self.module.target_config().pointer_type();
+        ctx.func.signature.params.push(AbiParam::new(ptr_type)); // columns
+        ctx.func.signature.params.push(AbiParam::new(types::I64)); // n_rows
+        ctx.func.signature.params.push(AbiParam::new(ptr_type)); // out buffer
+        ctx.func.signature.returns.push(AbiParam::new(types::I64)); // match count
+
+        {
+            let mut builder = FunctionBuilder::new(&mut ctx.func, &mut fn_builder_ctx);
+            let entry = builder.create_block();
+            let header = builder.create_block();
+            let body = builder.create_block();
+            let exit = builder.create_block();
+
+            builder.append_block_params_for_function_params(entry);
+            builder.switch_to_block(entry);
+
+            let cols_ptr = builder.block_params(entry)[0];
+            let n_rows = builder.block_params(entry)[1];
+            let out_ptr = builder.block_params(entry)[2];
+
+            // Loop state lives in Cranelift variables (SSA is built for us).
+            let i_var = builder.declare_var(types::I64);
+            let count_var = builder.declare_var(types::I64);
+            let zero = builder.ins().iconst(types::I64, 0);
+            builder.def_var(i_var, zero);
+            builder.def_var(count_var, zero);
+            builder.ins().jump(header, &[]);
+
+            // header: while i < n_rows
+            builder.switch_to_block(header);
+            let i = builder.use_var(i_var);
+            let more = builder.ins().icmp(IntCC::SignedLessThan, i, n_rows);
+            builder.ins().brif(more, body, &[], exit, &[]);
+
+            // body: evaluate predicate for row i, record it if it matches
+            builder.switch_to_block(body);
+            let i = builder.use_var(i_var);
+            let count = builder.use_var(count_var);
+            let keep = {
+                let mut codegen = ExprCodegen {
+                    builder: &mut builder,
+                    schema,
+                    cols_ptr,
+                    row_idx: i,
+                    ptr_type,
+                };
+                codegen.gen_bool_value(expr)
+            };
+            // Branch-free append: always write out[count] = i, then
+            // count += keep. (count <= i < n_rows, so the write is in range.)
+            let idx32 = builder.ins().ireduce(types::I32, i);
+            let byte_off = builder.ins().imul_imm(count, 4);
+            let addr = builder.ins().iadd(out_ptr, byte_off);
+            builder.ins().store(MemFlags::trusted(), idx32, addr, 0);
+            let keep64 = builder.ins().uextend(types::I64, keep);
+            let new_count = builder.ins().iadd(count, keep64);
+            let next_i = builder.ins().iadd_imm(i, 1);
+            builder.def_var(count_var, new_count);
+            builder.def_var(i_var, next_i);
+            builder.ins().jump(header, &[]);
+
+            // exit: return the number of matches
+            builder.switch_to_block(exit);
+            let result = builder.use_var(count_var);
+            builder.ins().return_(&[result]);
+
+            builder.seal_all_blocks();
+            builder.finalize();
+        }
+
+        let func_id = self
+            .module
+            .declare_function(fn_name, Linkage::Export, &ctx.func.signature)
+            .expect("failed to declare function");
+        self.module
+            .define_function(func_id, &mut ctx)
+            .expect("failed to define function");
+        self.module.clear_context(&mut ctx);
+        self.module
+            .finalize_definitions()
+            .expect("failed to finalize JIT definitions");
+
+        let code_ptr = self.module.get_finalized_function(func_id);
+        unsafe { std::mem::transmute::<*const u8, CompiledLoopFn>(code_ptr) }
     }
 }
 
