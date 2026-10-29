@@ -1,20 +1,20 @@
 window.EXPRJIT_DATA = {
-    query: "age > 10 && score < 20.0",
+    query: "age>18",
     totalRows: 20,
-    matchedRows: 5,
-    matchPct: 25.00,
-    coldCompileUs: 847.30,
+    matchedRows: 1,
+    matchPct: 5.00,
+    coldCompileUs: 1385.50,
     warmCompileUs: 0,
     compileUs: 0.00,
-    jitUs: 4.10,
-    interpreterUs: 5.20,
-    speedup: 1.27,
+    jitUs: 7.00,
+    interpreterUs: 4.00,
+    speedup: 0.57,
     cacheStatus: "HIT",
     correctness: "PASS",
     compiledShapes: 1,
-    indices: [11, 12, 13, 14, 15],
+    indices: [19],
     history: [
-        { query: "age > 10 && score < 20.0", rows: 20, matched: 5, cache: "MISS", jitUs: 9.10, interpreterUs: 5.60 },
-        { query: "age > 10 && score < 20.0", rows: 20, matched: 5, cache: "HIT", jitUs: 4.10, interpreterUs: 5.20 }
+        { query: "age>18", rows: 20, matched: 1, cache: "MISS", jitUs: 13.90, interpreterUs: 6.50 },
+        { query: "age>18", rows: 20, matched: 1, cache: "HIT", jitUs: 7.00, interpreterUs: 4.00 }
     ]
 };

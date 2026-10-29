@@ -16,34 +16,82 @@ use exprjit::engine::Engine;
 use exprjit::interp::{self, Value};
 use exprjit::parser::parse;
 
-const USAGE: &str = r#"exprjit - JIT-compiled query filtering over Arrow record batches
+const USAGE: &str = "\
+ExprJIT — expression JIT query engine
 
-USAGE:
-    exprjit                                Run a demo query
-    exprjit "<query>"                      Run a custom query
-    exprjit --rows <n> "<query>"           Use n synthetic rows (default 20)
-    exprjit --csv <path> "<query>"         Load CSV and run query
-    exprjit --csv <path> --list-columns    Show CSV columns
-    exprjit --help                         Show this message
+Usage:
+  exprjit [--csv FILE] [--list-columns] [QUERY]
+  exprjit --server
 
-QUERY SYNTAX:
-    Comparisons: >  <  >=  <=  ==  !=
-    Logic:       &&  ||  !
-    Values:      column names, integer/float literals
-    Grouping:    ( ... )
+Options:
+  --csv FILE       Load data from a CSV file
+  --list-columns   List columns from the CSV file
+  --server         Start the dashboard API server
+  -h, --help       Show this help message
 
-EXAMPLES:
-    age > 18
-    age > 10 && score < 20.0
-    age > 15 || score > 15.0
-    (age > 10) && (score > 5.0)
+Examples:
+  exprjit \"age > 30\"
+  exprjit --csv people.csv \"age > 30\"
+  exprjit --csv people.csv --list-columns
+  exprjit --server
+";
 
-TIP:
-    Use `cargo run --release` for meaningful timings, and --rows 1000000
-    so there is enough data for the speedup to show.
-"#;
+#[derive(Debug, Default)]
+struct Args {
+    csv_path: Option<String>,
+    list_columns: bool,
+    server: bool,
+    query: Option<String>,
+}
 
-/// Built-in demo data: `rows` rows containing age (0..rows) and score (age * 1.3).
+fn parse_args() -> Result<Args> {
+    let mut args = Args::default();
+    let mut it = env::args().skip(1);
+
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                println!("{USAGE}");
+                std::process::exit(0);
+            }
+
+            "--csv" => match it.next() {
+                Some(path) if !path.starts_with("--") => {
+                    args.csv_path = Some(path);
+                }
+                _ => {
+                    anyhow::bail!(
+                        "--csv needs a file path, e.g. --csv data.csv"
+                    );
+                }
+            },
+
+            "--list-columns" => {
+                args.list_columns = true;
+            }
+
+            "--server" => {
+                args.server = true;
+            }
+
+            _ if arg.starts_with("--") => {
+                anyhow::bail!("Unknown option: {arg}\n\n{USAGE}");
+            }
+
+            _ => {
+                if args.query.is_some() {
+                    anyhow::bail!(
+                        "Only one query expression is supported.\n\n{USAGE}"
+                    );
+                }
+                args.query = Some(arg);
+            }
+        }
+    }
+
+    Ok(args)
+}
+
 fn sample_batch(rows: usize) -> Result<RecordBatch> {
     let schema = Arc::new(ArrowSchema::new(vec![
         Field::new("age", DataType::Int64, false),
@@ -52,138 +100,87 @@ fn sample_batch(rows: usize) -> Result<RecordBatch> {
 
     let age = Int64Array::from((0..rows as i64).collect::<Vec<_>>());
 
-    let score = Float64Array::from((0..rows).map(|i| i as f64 * 1.3).collect::<Vec<_>>());
+    let score = Float64Array::from(
+        (0..rows)
+            .map(|i| i as f64 * 1.3)
+            .collect::<Vec<_>>(),
+    );
 
-    RecordBatch::try_new(schema, vec![Arc::new(age), Arc::new(score)])
-        .context("building sample batch")
+    RecordBatch::try_new(
+        schema,
+        vec![Arc::new(age), Arc::new(score)],
+    )
+    .context("building sample data")
 }
 
-/// Display columns and data types.
-fn list_columns(batch: &RecordBatch) {
-    println!("columns:");
-
+fn interpreter_filter(
+    batch: &RecordBatch,
+    expr: &Expr,
+) -> Result<Vec<u32>> {
     let schema = batch.schema();
 
-    for field in schema.fields().iter() {
-        println!("  {:<20} {:?}", field.name(), field.data_type());
-    }
-
-    println!("rows: {}", batch.num_rows());
-}
-
-/// Command-line arguments.
-struct Args {
-    csv_path: Option<String>,
-    rows: Option<usize>,
-    query: Option<String>,
-    list_columns: bool,
-    help: bool,
-}
-
-/// Parse command-line arguments.
-fn parse_args() -> Result<Args> {
-    let mut args = Args {
-        csv_path: None,
-        rows: None,
-        query: None,
-        list_columns: false,
-        help: false,
-    };
-
-    let mut it = env::args().skip(1);
-
-    while let Some(arg) = it.next() {
-        match arg.as_str() {
-            "--csv" => match it.next() {
-                Some(p) if !p.starts_with("--") => args.csv_path = Some(p),
-                _ => anyhow::bail!("--csv needs a file path, e.g. --csv data.csv"),
-            },
-
-            "--rows" => {
-                let value = it
-                    .next()
-                    .ok_or_else(|| anyhow::anyhow!("--rows needs a number, e.g. --rows 1000000"))?;
-                let n: usize = value.parse().with_context(|| {
-                    format!("--rows must be a positive whole number, got `{value}`")
-                })?;
-                if n == 0 {
-                    anyhow::bail!("--rows must be at least 1");
-                }
-                args.rows = Some(n);
-            }
-
-            "--list-columns" => {
-                args.list_columns = true;
-            }
-
-            "--help" | "-h" => {
-                args.help = true;
-            }
-
-            other => {
-                args.query = Some(other.to_string());
-            }
-        }
-    }
-
-    Ok(args)
-}
-
-/// Run the interpreter version of the query.
-///
-/// Columns are resolved once and a single row map is reused for every row,
-/// so the timing reflects expression evaluation rather than per-row
-/// allocation.
-fn interpreter_filter(batch: &RecordBatch, expr: &Expr) -> Result<(Vec<u32>, std::time::Duration)> {
-    enum Col<'a> {
+    enum Column<'a> {
         Int(&'a Int64Array),
         Float(&'a Float64Array),
     }
 
-    let schema = batch.schema();
-    let mut cols: Vec<(&str, Col<'_>)> = Vec::with_capacity(schema.fields().len());
-    for (idx, field) in schema.fields().iter().enumerate() {
-        let array = batch.column(idx);
-        let col = match array.data_type() {
-            DataType::Int64 => Col::Int(
-                array
+    let mut columns = Vec::new();
+
+    for (i, field) in schema.fields().iter().enumerate() {
+        let column = match batch.column(i).data_type() {
+            DataType::Int64 => Column::Int(
+                batch
+                    .column(i)
                     .as_any()
                     .downcast_ref::<Int64Array>()
-                    .ok_or_else(|| anyhow::anyhow!("failed to read Int64 column"))?,
+                    .context("reading Int64 column")?,
             ),
-            DataType::Float64 => Col::Float(
-                array
+
+            DataType::Float64 => Column::Float(
+                batch
+                    .column(i)
                     .as_any()
                     .downcast_ref::<Float64Array>()
-                    .ok_or_else(|| anyhow::anyhow!("failed to read Float64 column"))?,
+                    .context("reading Float64 column")?,
             ),
-            other => anyhow::bail!("interpreter does not support {other:?}"),
+
+            other => {
+                anyhow::bail!(
+                    "Unsupported column type for interpreter: {other:?}"
+                );
+            }
         };
-        cols.push((field.name().as_str(), col));
+
+        columns.push((field.name().clone(), column));
     }
 
-    let started = Instant::now();
-    let mut kept = Vec::new();
-    let mut row: HashMap<&str, Value> = HashMap::with_capacity(cols.len());
+    let mut result = Vec::new();
+
+    let mut row: HashMap<&str, Value> = HashMap::new();
 
     for row_idx in 0..batch.num_rows() {
-        for (name, col) in &cols {
-            let value = match col {
-                Col::Int(a) => Value::Int(a.value(row_idx)),
-                Col::Float(a) => Value::Float(a.value(row_idx)),
+        row.clear();
+
+        for (name, column) in &columns {
+            let value = match column {
+                Column::Int(array) => Value::Int(array.value(row_idx)),
+                Column::Float(array) => Value::Float(array.value(row_idx)),
             };
-            row.insert(*name, value);
+
+            row.insert(name.as_str(), value);
         }
 
-        if interp::eval_bool(expr, &row).with_context(|| format!("interpreting row {row_idx}"))? {
-            kept.push(row_idx as u32);
+        if interp::eval_bool(expr, &row)
+            .with_context(|| format!("interpreting row {row_idx}"))?
+        {
+            result.push(row_idx as u32);
         }
     }
 
-    Ok((kept, started.elapsed()))
+    Ok(result)
 }
 
-/// Dashboard data.
+#[derive(Debug, Clone)]
 struct QueryStats {
     query: String,
     total_rows: usize,
@@ -198,317 +195,279 @@ struct QueryStats {
     indices: Vec<u32>,
 }
 
-/// Escape text so it is safe inside JavaScript strings.
-fn js_escape(value: &str) -> String {
+fn write_dashboard_data(stats: &[QueryStats]) -> Result<()> {
+    let latest = stats.last();
+
+    let current_query = latest
+        .map(|s| s.query.clone())
+        .unwrap_or_default();
+
+    let total_rows = latest
+        .map(|s| s.total_rows)
+        .unwrap_or(0);
+
+    let matched_rows = latest
+        .map(|s| s.matched_rows)
+        .unwrap_or(0);
+
+    let match_pct = latest
+        .map(|s| s.match_pct)
+        .unwrap_or(0.0);
+
+    let compile_us = latest
+        .map(|s| s.compile_us)
+        .unwrap_or(0.0);
+
+    let jit_us = latest
+        .map(|s| s.jit_us)
+        .unwrap_or(0.0);
+
+    let interpreter_us = latest
+        .map(|s| s.interpreter_us)
+        .unwrap_or(0.0);
+
+    let speedup = latest
+        .map(|s| s.speedup)
+        .unwrap_or(0.0);
+
+    let cache_status = latest
+        .map(|s| s.cache_status.clone())
+        .unwrap_or_else(|| "N/A".to_string());
+
+    let correctness = latest
+        .map(|s| s.correctness.clone())
+        .unwrap_or_else(|| "N/A".to_string());
+
+    let indices = latest
+        .map(|s| s.indices.clone())
+        .unwrap_or_default();
+
+    let history = stats
+        .iter()
+        .map(|s| {
+            format!(
+                r#"{{"query":"{}","matched_rows":{},"jit_us":{},"interpreter_us":{},"speedup":{},"cache_status":"{}","correctness":"{}"}}"#,
+                escape_json(&s.query),
+                s.matched_rows,
+                s.jit_us,
+                s.interpreter_us,
+                s.speedup,
+                escape_json(&s.cache_status),
+                escape_json(&s.correctness),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let indices_json = indices
+        .iter()
+        .map(|i| i.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let js = format!(
+        r#"window.EXPRJIT_DATA = {{
+  "query": "{}",
+  "total_rows": {},
+  "matched_rows": {},
+  "match_pct": {},
+  "compile_us": {},
+  "jit_us": {},
+  "interpreter_us": {},
+  "speedup": {},
+  "cache_status": "{}",
+  "correctness": "{}",
+  "indices": [{}],
+  "history": [{}]
+}};
+"#,
+        escape_json(&current_query),
+        total_rows,
+        matched_rows,
+        match_pct,
+        compile_us,
+        jit_us,
+        interpreter_us,
+        speedup,
+        escape_json(&cache_status),
+        escape_json(&correctness),
+        indices_json,
+        history,
+    );
+
+    fs::write("dashboard_data.js", js)
+        .context("writing dashboard_data.js")?;
+
+    Ok(())
+}
+
+fn escape_json(value: &str) -> String {
     value
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
         .replace('\n', "\\n")
         .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }
 
-/// Write the results of this session to dashboard_data.js.
-///
-/// The top-level fields describe the latest run (as before); `history`
-/// lists every run of the session, oldest first. `coldCompileUs` comes
-/// from the first run, because a cache hit compiles nothing.
-fn write_dashboard_data(runs: &[QueryStats], compiled_shapes: usize) -> Result<()> {
-    let (Some(first), Some(latest)) = (runs.first(), runs.last()) else {
-        anyhow::bail!("no runs to write to the dashboard");
-    };
-    let cold_compile_us = first.compile_us;
-
-    // Only a sample of indexes goes to the dashboard: with millions of rows
-    // the full list would make the file huge. `matchedRows` has the count.
-    let indices = latest
-        .indices
-        .iter()
-        .take(100)
-        .map(|i| i.to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let history = runs
-        .iter()
-        .map(|r| {
-            format!(
-                r#"{{ query: "{}", rows: {}, matched: {}, cache: "{}", jitUs: {:.2}, interpreterUs: {:.2} }}"#,
-                js_escape(&r.query),
-                r.total_rows,
-                r.matched_rows,
-                r.cache_status,
-                r.jit_us,
-                r.interpreter_us
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",\n        ");
-
-    let js = format!(
-        r#"window.EXPRJIT_DATA = {{
-    query: "{}",
-    totalRows: {},
-    matchedRows: {},
-    matchPct: {:.2},
-    coldCompileUs: {:.2},
-    warmCompileUs: 0,
-    compileUs: {:.2},
-    jitUs: {:.2},
-    interpreterUs: {:.2},
-    speedup: {:.2},
-    cacheStatus: "{}",
-    correctness: "{}",
-    compiledShapes: {},
-    indices: [{}],
-    history: [
-        {}
-    ]
-}};
-"#,
-        js_escape(&latest.query),
-        latest.total_rows,
-        latest.matched_rows,
-        latest.match_pct,
-        cold_compile_us,
-        latest.compile_us,
-        latest.jit_us,
-        latest.interpreter_us,
-        latest.speedup,
-        latest.cache_status,
-        latest.correctness,
-        compiled_shapes,
-        indices,
-        history
-    );
-
-    fs::write("dashboard_data.js", js).context("writing dashboard_data.js")?;
-
-    Ok(())
-}
-
-/// Run one query.
 fn run_query(
     engine: &mut Engine,
     batch: &RecordBatch,
     query: &str,
     label: &str,
 ) -> Result<QueryStats> {
-    println!();
-    println!("Running: {}", label);
-
-    // ------------------------------------------------------------
-    // 1. JIT COMPILATION
-    // ------------------------------------------------------------
+    println!("\n[{label}] Query: {query}");
 
     let compiled = engine
         .compile_query(query, batch)
         .with_context(|| format!("compiling query `{query}`"))?;
 
-    // ------------------------------------------------------------
-    // 2. JIT EXECUTION
-    // ------------------------------------------------------------
+    let compile_us =
+        compiled.compile_time.as_secs_f64() * 1_000_000.0;
+
+    let cache_status = if compiled.cache_hit {
+        "HIT"
+    } else {
+        "MISS"
+    };
 
     let started = Instant::now();
 
-    let kept = compiled
+    let indices = compiled
         .filter(batch)
-        .with_context(|| format!("running query `{query}`"))?;
+        .with_context(|| format!("executing query `{query}`"))?;
 
     let jit_time = started.elapsed();
-
-    // ------------------------------------------------------------
-    // 3. INTERPRETER EXECUTION
-    // ------------------------------------------------------------
 
     let expr = parse(query)
         .map_err(|e| anyhow::anyhow!(e.to_string()))
         .context("parsing query for interpreter comparison")?;
 
-    let (interp_kept, interp_time) = interpreter_filter(batch, &expr)?;
+    let started = Instant::now();
 
-    // ------------------------------------------------------------
-    // 4. SPEEDUP
-    // ------------------------------------------------------------
+    let interpreter_indices = interpreter_filter(batch, &expr)?;
+
+    let interpreter_time = started.elapsed();
 
     let speedup = if jit_time.as_nanos() > 0 {
-        interp_time.as_secs_f64() / jit_time.as_secs_f64()
+        interpreter_time.as_secs_f64()
+            / jit_time.as_secs_f64()
     } else {
         0.0
     };
 
-    // ------------------------------------------------------------
-    // 5. CACHE
-    // ------------------------------------------------------------
-
-    let cache_status = if compiled.cache_hit { "HIT" } else { "MISS" };
-
-    let compile_status = if compiled.cache_hit {
-        "cache hit - reused compiled code".to_string()
+    let match_pct = if batch.num_rows() > 0 {
+        indices.len() as f64 * 100.0
+            / batch.num_rows() as f64
     } else {
-        format!("compiled in {:.2?}", compiled.compile_time)
-    };
-
-    // ------------------------------------------------------------
-    // 6. MATCH PERCENTAGE
-    // ------------------------------------------------------------
-
-    let match_pct = if batch.num_rows() == 0 {
         0.0
-    } else {
-        kept.len() as f64 * 100.0 / batch.num_rows() as f64
     };
 
-    // ------------------------------------------------------------
-    // 7. CORRECTNESS
-    // ------------------------------------------------------------
-
-    let correctness = if kept == interp_kept { "PASS" } else { "FAIL" };
-
-    // Compilation time in microseconds.
-    let compile_us = compiled.compile_time.as_secs_f64() * 1_000_000.0;
-
-    let jit_us = jit_time.as_secs_f64() * 1_000_000.0;
-
-    let interpreter_us = interp_time.as_secs_f64() * 1_000_000.0;
-
-    // ------------------------------------------------------------
-    // DISPLAY
-    // ------------------------------------------------------------
-
-    println!();
-    println!("============================================================");
-    println!("                    ExprJIT RESULT");
-    println!("============================================================");
-
-    println!("Query              : {}", query);
-
-    println!("------------------------------------------------------------");
-
-    println!("Total Rows         : {}", batch.num_rows());
-
-    println!("Rows Matched       : {}", kept.len());
-
-    println!("Match Percentage   : {:.1}%", match_pct);
-
-    println!("------------------------------------------------------------");
-
-    println!("Compilation        : {}", compile_status);
-
-    println!("Cache Status       : {}", cache_status);
-
-    println!("------------------------------------------------------------");
-
-    println!("JIT Execution      : {:.2?}", jit_time);
-
-    println!("Interpreter Time   : {:.2?}", interp_time);
-
-    println!("JIT Speedup        : {:.2}x", speedup);
-
-    println!("------------------------------------------------------------");
-
-    println!("Correctness        : {}", correctness);
-
-    let shown: Vec<u32> = kept.iter().copied().take(20).collect();
-    if kept.len() > shown.len() {
-        println!(
-            "Matched Row Indexes: {:?} ... and {} more",
-            shown,
-            kept.len() - shown.len()
-        );
+    let correctness = if indices == interpreter_indices {
+        "PASS"
     } else {
-        println!("Matched Row Indexes: {:?}", shown);
-    }
+        "FAIL"
+    };
 
-    println!("============================================================");
+    println!("  Total rows:      {}", batch.num_rows());
+    println!("  Matched rows:    {}", indices.len());
+    println!("  Match percentage:{match_pct:>8.2}%");
+    println!("  Compile time:    {compile_us:.2} us");
+    println!(
+        "  JIT execution:   {:.2} us",
+        jit_time.as_secs_f64() * 1_000_000.0
+    );
+    println!(
+        "  Interpreter:     {:.2} us",
+        interpreter_time.as_secs_f64() * 1_000_000.0
+    );
+    println!("  Speedup:         {speedup:.2}x");
+    println!("  Cache:           {cache_status}");
+    println!("  Correctness:     {correctness}");
+    println!("  Matching indices:{indices:?}");
 
     Ok(QueryStats {
         query: query.to_string(),
         total_rows: batch.num_rows(),
-        matched_rows: kept.len(),
+        matched_rows: indices.len(),
         match_pct,
         compile_us,
-        jit_us,
-        interpreter_us,
+        jit_us: jit_time.as_secs_f64() * 1_000_000.0,
+        interpreter_us: interpreter_time.as_secs_f64() * 1_000_000.0,
         speedup,
         cache_status: cache_status.to_string(),
         correctness: correctness.to_string(),
-        indices: kept,
+        indices,
     })
 }
 
-/// Main program.
 fn run() -> Result<()> {
     let args = parse_args()?;
 
-    // HELP
-    if args.help {
-        print!("{USAGE}");
-        return Ok(());
+    // Start the API server when --server is supplied.
+    if args.server {
+        return exprjit::api::serve();
     }
 
-    if cfg!(debug_assertions) {
-        eprintln!(
-            "note: debug build - timings are not representative. \
-             Use `cargo run --release` for real numbers."
-        );
-    }
-
-    // LOAD DATA
-    let batch = match (&args.csv_path, args.rows) {
-        (Some(_), Some(_)) => anyhow::bail!("use either --csv or --rows, not both"),
-        (Some(path), None) => load_csv(path).with_context(|| format!("loading CSV from {path}"))?,
-        (None, rows) => sample_batch(rows.unwrap_or(20))?,
+    let batch = if let Some(csv_path) = &args.csv_path {
+        load_csv(csv_path)
+            .with_context(|| format!("loading CSV file `{csv_path}`"))?
+    } else {
+        sample_batch(20)?
     };
 
-    // LIST COLUMNS
     if args.list_columns {
-        list_columns(&batch);
+        println!("Columns:");
+
+        for field in batch.schema().fields() {
+            println!(
+                "  {} ({:?})",
+                field.name(),
+                field.data_type()
+            );
+        }
+
         return Ok(());
     }
 
-    // QUERY
     let query = args
         .query
-        .unwrap_or_else(|| "age > 10 && score < 20.0".to_string());
+        .unwrap_or_else(|| "age > 10".to_string());
 
-    // ENGINE
     let mut engine = Engine::new();
+    let mut history = Vec::new();
 
-    // Run the same query twice: the first run compiles (cache MISS), the
-    // second reuses the compiled code (cache HIT).
-    let cold = run_query(&mut engine, &batch, &query, "run 1 (cold)")?;
-    let warm = run_query(&mut engine, &batch, &query, "run 2 (warm)")?;
+    let cold_stats = run_query(
+        &mut engine,
+        &batch,
+        &query,
+        "COLD RUN",
+    )?;
 
-    // WRITE DASHBOARD DATA (both runs, so the history has two rows)
-    let runs = [cold, warm];
-    write_dashboard_data(&runs, engine.compiled_shape_count())?;
+    history.push(cold_stats);
 
-    // ------------------------------------------------------------
-    // SESSION STATISTICS
-    // ------------------------------------------------------------
+    let warm_stats = run_query(
+        &mut engine,
+        &batch,
+        &query,
+        "WARM RUN",
+    )?;
 
-    println!();
-    println!("============================================================");
-    println!("                  SESSION STATISTICS");
-    println!("============================================================");
+    history.push(warm_stats);
 
-    println!(
-        "Distinct query shapes compiled: {}",
-        engine.compiled_shape_count()
-    );
+    write_dashboard_data(&history)?;
 
-    println!("============================================================");
+    println!("\nDashboard data written to dashboard_data.js");
 
     Ok(())
 }
 
-/// Program entry point.
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
 
-        Err(e) => {
-            eprintln!("error: {e:#}");
+        Err(error) => {
+            eprintln!("Error: {error:#}");
             ExitCode::FAILURE
         }
     }
