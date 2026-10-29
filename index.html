@@ -31,7 +31,7 @@ section{padding:48px 0;border-bottom:1px solid var(--line)}.section-head{display
 <p class="hero-label">A query expression compiled into native machine code via Cranelift and executed over Apache Arrow columnar data. The metrics below come from the latest ExprJIT Rust execution.</p>
 <div class="hero-figure"><div class="hero-num" id="heroNum">0×</div><div class="hero-caption">JIT speedup over the interpreter for the latest query</div></div>
 <div class="hero-sub">JIT <b id="heroJit">0.00 µs</b> vs Interpreter <b id="heroInterp">0.00 µs</b> · Query <b id="heroQuery">—</b></div>
-<div class="live">● LIVE DATA FROM dashboard_data.js</div>
+<div class="live" id="liveBadge">● CONNECTING TO RUST API</div>
 </div></div>
 
 <section><div class="wrap"><div class="section-head"><h2>ExprJIT features</h2><div class="note">All 10 cards are connected to the latest Rust-generated dashboard data.</div></div>
@@ -47,7 +47,7 @@ section{padding:48px 0;border-bottom:1px solid var(--line)}.section-head{display
 <div class="card"><div class="feature-num">09</div><div class="value" id="featureCorrect">—</div><div class="label">JIT vs interpreter correctness</div></div>
 <div class="card"><div class="feature-num">10</div><div class="value" id="featureShapes">—</div><div class="label">Distinct query shapes compiled</div></div>
 </div>
-<div class="label" style="margin-top:18px">Latest Rust query is loaded into the input automatically. Type a new query and press RUN QUERY to make that query the current dashboard query. Refresh after running the Rust CLI to load its newest data.</div>
+<div class="label" style="margin-top:18px">Enter a query and press RUN QUERY. Results below are returned by the running Rust backend at 127.0.0.1:3000.</div>
 </div></section>
 
 <section><div class="wrap"><div class="section-head"><h2>How a query gets compiled</h2><div class="note">The actual ExprJIT processing pipeline.</div></div>
@@ -59,13 +59,14 @@ section{padding:48px 0;border-bottom:1px solid var(--line)}.section-head{display
 <div class="stage"><div class="feature-num">05</div><b>Arrow batch</b><small>Evaluates columnar data.</small></div>
 </div></div></section>
 
-<section><div class="wrap"><div class="section-head"><h2>Query demo console</h2><div class="note">Browser-side demo of the 20-row sample dataset. Rust CLI remains authoritative.</div></div>
+<section><div class="wrap"><div class="section-head"><h2>Query demo console</h2><div class="note">Queries are sent to the running ExprJIT Rust API.</div></div>
 <div class="console"><input id="queryInput" class="input" value="age > 10 && score < 20.0" aria-label="Query"><button class="button" id="runButton">RUN QUERY</button></div>
 <div class="result">
 <div class="box"><div class="result-title">QUERY STATUS</div><div class="result-value" id="demoStatus">Ready</div></div>
 <div class="box"><div class="result-title">ROWS MATCHED</div><div class="result-value" id="demoMatched">—</div></div>
 <div class="box"><div class="result-title">MATCH %</div><div class="result-value" id="demoPct">—</div></div>
 <div class="box"><div class="result-title">CACHE</div><div class="result-value" id="demoCache">See Rust result</div></div>
+<div class="box" style="grid-column:1/-1"><div class="result-title">MATCHED ROW INDICES</div><div class="result-value" id="demoIndices">Run a query to see matching row indices</div></div>
 </div>
 <div class="label" style="margin-top:12px">Try: <span class="mono try-query" data-query="age > 10">age &gt; 10</span> · <span class="mono try-query" data-query="age > 10 && score < 20.0">age &gt; 10 &amp;&amp; score &lt; 20.0</span> · <span class="mono try-query" data-query="age > 15 || score < 5.0">age &gt; 15 || score &lt; 5.0</span></div>
 </div></section>
@@ -81,12 +82,12 @@ section{padding:48px 0;border-bottom:1px solid var(--line)}.section-head{display
 <div class="bar-callout">→ Current cache: <b id="performanceCache">—</b></div></div>
 </div></section>
 
-<section><div class="wrap"><div class="section-head"><h2>Current execution history</h2><div class="note">Latest row written by the Rust backend.</div></div>
+<section><div class="wrap"><div class="section-head"><h2>Current execution history</h2><div class="note">Updated after each successful Rust API query.</div></div>
 <table class="history" style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Query</th><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Rows</th><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Match</th><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Cache</th><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">JIT</th><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Interpreter</th></tr></thead>
 <tbody><tr><td id="hQuery" style="padding:10px">—</td><td id="hRows" style="padding:10px">—</td><td id="hMatch" style="padding:10px">—</td><td id="hCache" style="padding:10px">—</td><td id="hJit" style="padding:10px">—</td><td id="hInterp" style="padding:10px">—</td></tr></tbody></table>
 </div></section>
 
-<section><div class="wrap"><div class="section-head"><h2>Session runs</h2><div class="note">Every run from the Rust program: run 1 compiles the query (cache MISS), run 2 reuses the compiled code (cache HIT).</div></div>
+<section><div class="wrap"><div class="section-head"><h2>Session runs</h2><div class="note">Queries run in this dashboard session appear here, newest first.</div></div>
 <table class="history" style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Run</th><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Query</th><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Rows</th><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Match</th><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Cache</th><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">JIT</th><th style="text-align:left;padding:10px;border-bottom:1px solid var(--line)">Interpreter</th></tr></thead>
 <tbody id="runsBody"><tr><td colspan="7" style="padding:10px">—</td></tr></tbody></table>
 </div></section>
@@ -113,148 +114,171 @@ section{padding:48px 0;border-bottom:1px solid var(--line)}.section-head{display
 
 <script src="dashboard_data.js"></script>
 <script>
-(function(){
-"use strict";
-const d=window.EXPRJIT_DATA||{};
-const n=(v,f=0)=>Number.isFinite(Number(v))?Number(v):f;
-const s=(v,f="—")=>(v===undefined||v===null||v==="")?f:String(v);
-const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v};
-const q=s(d.query), total=n(d.totalRows), matched=n(d.matchedRows), pct=n(d.matchPct);
-  // Load the latest query from the Rust-generated dashboard data into the input itself.
-  const queryInput=document.getElementById("queryInput");
-  if(queryInput && d.query && d.query !== "—") queryInput.value=d.query;
-const compile=n(d.coldCompileUs)||n(d.compileUs), jit=n(d.jitUs), interp=n(d.interpreterUs), speed=n(d.speedup);
-const shapes=n(d.compiledShapes), cache=s(d.cacheStatus,"UNKNOWN").toUpperCase(), correct=s(d.correctness,"UNKNOWN").toUpperCase();
-const fmt=v=>n(v).toFixed(2)+" µs", pctText=pct.toFixed(1).replace(".0","")+"%";
+(function () {
+  "use strict";
 
-set("heroNum",speed.toFixed(2)+"×");set("heroJit",fmt(jit));set("heroInterp",fmt(interp));set("heroQuery",q);
-set("featureQuery",q);set("featureTotal",total);set("featureMatched",matched);set("featurePct",pctText);
-set("featureCompile",fmt(compile));set("featureJit",fmt(jit));set("featureCache",cache);set("featureSpeedup",speed.toFixed(2)+"×");
-set("featureCorrect",correct);set("featureShapes",shapes);
+  const d = window.EXPRJIT_DATA || {};
+  const set = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  };
+  const num = value => {
+    const result = Number(value);
+    return Number.isFinite(result) ? result : 0;
+  };
+  const fmtUs = value => num(value).toFixed(2) + " µs";
+  const pctText = value => num(value).toFixed(1).replace(/\.0$/, "") + "%";
+  const history = [];
 
-set("demoStatus","Loaded from Rust");set("demoMatched",matched+" / "+total);set("demoPct",pctText);set("demoCache",cache);
-set("jitBarValue",fmt(jit));set("interpBarValue",fmt(interp));set("performanceSpeedup",speed.toFixed(2)+"×");
-set("compileBarValue",fmt(compile));set("cacheBarValue",cache);set("performanceCache",cache);
-set("hQuery",q);set("hRows",total);set("hMatch",matched+" ("+pctText+")");set("hCache",cache);set("hJit",fmt(jit));set("hInterp",fmt(interp));set("correctNum",correct);
+  // Use the saved dashboard data only to populate the page before the first API run.
+  const input = document.getElementById("queryInput");
+  if (input && d.query && d.query !== "—") input.value = d.query;
 
-// Session runs table: one row per run written by the Rust program.
-const runsBody=document.getElementById("runsBody");
-if(runsBody&&Array.isArray(d.history)&&d.history.length){
- runsBody.textContent="";
- d.history.forEach((r,i)=>{
-  const rows=n(r.rows),hit=n(r.matched);
-  const share=rows?(hit/rows*100).toFixed(1).replace(".0",""):"0";
-  const tr=document.createElement("tr");
-  [ "run "+(i+1)+(i===0?" (cold)":" (warm)"), s(r.query), rows, hit+" ("+share+"%)", s(r.cache).toUpperCase(), fmt(r.jitUs), fmt(r.interpreterUs) ].forEach(t=>{
-   const td=document.createElement("td");td.style.padding="10px";td.textContent=t;tr.appendChild(td);
+  function showResult(r) {
+    const query = String(r.query || input.value.trim() || "—");
+    const total = num(r.total_rows);
+    const matched = num(r.matched_rows);
+    const pct = num(r.match_pct);
+    const compile = num(r.compile_us);
+    const jit = num(r.jit_us);
+    const interp = num(r.interpreter_us);
+    const speed = num(r.speedup);
+    const cache = String(r.cache_status || "UNKNOWN").toUpperCase();
+    const correct = String(r.correctness || "UNKNOWN").toUpperCase();
+    const indices = Array.isArray(r.indices) ? r.indices : [];
+
+    set("liveBadge", "● LIVE DATA FROM RUST API");
+    set("heroNum", speed.toFixed(2) + "×");
+    set("heroJit", fmtUs(jit));
+    set("heroInterp", fmtUs(interp));
+    set("heroQuery", query);
+
+    set("featureQuery", query);
+    set("featureTotal", total);
+    set("featureMatched", matched);
+    set("featurePct", pctText(pct));
+    set("featureCompile", fmtUs(compile));
+    set("featureJit", fmtUs(jit));
+    set("featureCache", cache);
+    set("featureSpeedup", speed.toFixed(2) + "×");
+    set("featureCorrect", correct);
+    set("featureShapes", "API result");
+
+    set("demoStatus", correct);
+    set("demoMatched", matched + " / " + total);
+    set("demoPct", pctText(pct));
+    set("demoCache", cache);
+    set("demoIndices", indices.length ? indices.join(", ") : "None");
+
+    set("jitBarValue", fmtUs(jit));
+    set("interpBarValue", fmtUs(interp));
+    set("performanceSpeedup", speed.toFixed(2) + "×");
+    set("compileBarValue", fmtUs(compile));
+    set("cacheBarValue", cache);
+    set("performanceCache", cache);
+
+    set("hQuery", query);
+    set("hRows", total);
+    set("hMatch", matched + " (" + pctText(pct) + ")");
+    set("hCache", cache);
+    set("hJit", fmtUs(jit));
+    set("hInterp", fmtUs(interp));
+    set("correctNum", correct);
+
+    const maxExecution = Math.max(jit, interp, 1);
+    document.getElementById("jitBar").style.width = (jit / maxExecution * 100) + "%";
+    document.getElementById("interpBar").style.width = (interp / maxExecution * 100) + "%";
+    document.getElementById("compileBar").style.width = (compile > 0 ? 100 : 2) + "%";
+    document.getElementById("cacheBar").style.width = (cache === "HIT" ? 100 : 25) + "%";
+
+    history.unshift({
+      query, total, matched, pct, cache, jit, interp
+    });
+    const body = document.getElementById("runsBody");
+    body.textContent = "";
+    history.slice(0, 10).forEach((item, index) => {
+      const row = document.createElement("tr");
+      const values = [
+        "run " + (history.length - index),
+        item.query,
+        item.total,
+        item.matched + " (" + pctText(item.pct) + ")",
+        item.cache,
+        fmtUs(item.jit),
+        fmtUs(item.interp)
+      ];
+      values.forEach(value => {
+        const cell = document.createElement("td");
+        cell.style.padding = "10px";
+        cell.textContent = value;
+        row.appendChild(cell);
+      });
+      body.appendChild(row);
+    });
+  }
+
+  async function runRustQuery() {
+    const query = input.value.trim();
+    if (!query) {
+      set("demoStatus", "Enter a query");
+      return;
+    }
+
+    const button = document.getElementById("runButton");
+    button.disabled = true;
+    button.textContent = "RUNNING...";
+    set("demoStatus", "Connecting to Rust...");
+    set("liveBadge", "● REQUESTING RUST API");
+
+    try {
+      const response = await fetch("http://127.0.0.1:3000/api/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query })
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || result.message || ("HTTP " + response.status));
+      }
+      showResult(result);
+      set("demoStatus", "PASS · " + String(result.correctness || "RESULT").toUpperCase());
+    } catch (error) {
+      set("demoStatus", "API ERROR");
+      set("liveBadge", "● RUST API CONNECTION FAILED");
+      set("demoIndices", "—");
+      console.error("ExprJIT API request failed:", error);
+      alert(
+        "Could not get a result from the Rust API.\n\n" +
+        "Make sure the server is running with: cargo run -- --server\n\n" +
+        "Details: " + error.message
+      );
+    } finally {
+      button.disabled = false;
+      button.textContent = "RUN QUERY";
+    }
+  }
+
+  document.getElementById("runButton").addEventListener("click", runRustQuery);
+  input.addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      runRustQuery();
+    }
   });
-  runsBody.appendChild(tr);
- });
-}
 
-const max=Math.max(jit,interp,1);
-document.getElementById("jitBar").style.width=(jit/max*100)+"%";
-document.getElementById("interpBar").style.width=(interp/max*100)+"%";
-document.getElementById("compileBar").style.width=(compile>0?100:2)+"%";
-document.getElementById("cacheBar").style.width=(cache==="HIT"?100:25)+"%";
+  document.querySelectorAll(".try-query").forEach(element => {
+    element.addEventListener("click", () => {
+      input.value = element.dataset.query;
+      runRustQuery();
+    });
+  });
 
-const rows=Array.from({length:20},(_,i)=>({age:i,score:i*1.3}));
-function tokenize(x){
- const t=[];let i=0;
- while(i<x.length){const c=x[i];if(/\s/.test(c)){i++;continue}
- if("()".includes(c)){t.push({t:c});i++;continue}
- if(c==="!"&&x[i+1]!=="="){t.push({t:"!"});i++;continue}
- if(c==="!"&&x[i+1]==="="){t.push({t:"!="});i+=2;continue}
- if(c==="&"&&x[i+1]==="&"){t.push({t:"&&"});i+=2;continue}
- if(c==="|"&&x[i+1]==="|"){t.push({t:"||"});i+=2;continue}
- if([">","<","="].includes(c)){let op=c;if(x[i+1]==="="){op+="=";i+=2}else i++;if(op==="=")throw Error("use ==");t.push({t:op});continue}
- if(/[0-9]/.test(c)){let j=i,dot=false;while(j<x.length&&(/[0-9]/.test(x[j])||(x[j]==="."&&!dot))){if(x[j]===".")dot=true;j++}t.push({t:"num",v:Number(x.slice(i,j))});i=j;continue}
- if(/[A-Za-z_]/.test(c)){let j=i;while(j<x.length&&/[A-Za-z0-9_]/.test(x[j]))j++;t.push({t:"id",v:x.slice(i,j)});i=j;continue}
- throw Error("unexpected character");
- }t.push({t:"eof"});return t;
-}
-function evaluate(t,row){let p=0,peek=()=>t[p],bump=()=>t[p++];
- function atom(){let x=bump();if(x.t==="id"){if(!(x.v in row))throw Error("unknown column");return row[x.v]}if(x.t==="num")return x.v;if(x.t==="("){let v=or();if(peek().t!==")")throw Error("missing )");bump();return v}throw Error("bad token")}
- function unary(){if(peek().t==="!"){bump();return !unary()}return atom()}
- function cmp(){let a=unary(),op=peek().t;if([">","<",">=","<=","==","!="].includes(op)){bump();let b=unary();if(op===">")return a>b;if(op==="<")return a<b;if(op===">=")return a>=b;if(op==="<=")return a<=b;if(op==="==")return a===b;return a!==b}return a}
- function and(){let a=cmp();while(peek().t==="&&"){bump();let b=cmp();a=a&&b}return a}
- function or(){let a=and();while(peek().t==="||"){bump();let b=and();a=a||b}return a}
- let r=or();if(peek().t!=="eof")throw Error("trailing input");return !!r;
-}
-function demo(){
- const input=document.getElementById("queryInput");
- const x=input.value.trim();
-
- // Always show the query currently typed by the user.
- set("featureQuery",x || "—");
- set("hQuery",x || "—");
-
- let m=[];
- if(!x){
-   set("demoStatus","Enter a query");
-   set("demoMatched","—");
-   set("demoPct","—");
-   set("demoCache","—");
-   set("featureMatched","—");
-   set("featurePct","—");
-   set("featureCache","—");
-   set("hRows","—");
-   set("hMatch","—");
-   set("hCache","—");
-   set("hJit","—");
-   set("hInterp","—");
-   return;
- }
-
- try{
-   const tokens=tokenize(x);
-   rows.forEach((r,i)=>{if(evaluate(tokens,r))m.push(i)});
- }catch(e){
-   // Clear old results so a new/invalid query never shows stale values.
-   set("demoStatus","Invalid query");
-   set("demoMatched","—");
-   set("demoPct","—");
-   set("demoCache","Browser demo");
-   set("featureMatched","—");
-   set("featurePct","—");
-   set("featureCache","Browser demo");
-   set("hRows",rows.length);
-   set("hMatch","—");
-   set("hCache","Browser demo");
-   set("hJit","—");
-   set("hInterp","—");
-   return;
- }
-
- const p=((m.length/rows.length)*100).toFixed(1).replace(".0","");
- const same=x===q.trim();
-
- // Update all current-query/result displays immediately.
- set("demoStatus",same?"Rust result + browser check":"Browser demo");
- set("demoMatched",m.length+" / "+rows.length);
- set("demoPct",p+"%");
- set("demoCache",same?cache:"Browser demo");
-
- set("featureQuery",x);
- set("featureMatched",m.length);
- set("featurePct",p+"%");
- set("featureCache",same?cache:"Browser demo");
-
- set("hQuery",x);
- set("hRows",rows.length);
- set("hMatch",m.length+" ("+p+"%)");
- set("hCache",same?cache:"Browser demo");
-}
-document.getElementById("runButton").addEventListener("click",demo);
-document.getElementById("queryInput").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();demo();}});
-
-document.querySelectorAll(".try-query").forEach(el=>{
- el.addEventListener("click",()=>{
-   document.getElementById("queryInput").value=el.dataset.query;
-   demo();
- });
-});
+  // Make the API connection obvious; clicking RUN QUERY refreshes all live metrics.
+  set("demoStatus", "Ready — run a Rust query");
+  set("demoIndices", "—");
 })();
 </script>
+
 </body>
 </html>
